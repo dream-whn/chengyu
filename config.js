@@ -1,4 +1,4 @@
 // 把 Google Apps Script 部署後的「網頁應用程式網址」貼在引號內
 window.CHENGYU_CONFIG = {
-  API_URL: ''
+  API_URL: 'https://script.google.com/macros/s/AKfycbyQNtjzMHsOi7NZip01GpDNs8BsKUnX55LMiGUekLcq4-QxwwatvlOowH9cFowVAPM/exec'
 };
