@@ -178,6 +178,37 @@ dialog::backdrop{background:rgba(0,0,0,.45)}
 .hello .lbl{font-size:12px;font-weight:700;padding:1px 8px;border-radius:999px;color:#fff}
 .r1l{background:#b98a0b}.r2l{background:#7f8893}.r3l{background:#a8622a}
 
+/* 分析 */
+.an-filters{display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin-bottom:18px}
+.an-filters label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.an-filters select{width:auto;min-width:130px}
+.an-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.an-card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;min-width:0}
+.an-card h3{font-size:17px;margin-bottom:2px}
+.an-card .desc{font-size:13px;color:var(--muted);margin:0 0 12px}
+.an-wide{margin-bottom:16px}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.chart .grid line{stroke:var(--line);stroke-width:1}
+.chart .axis text{fill:var(--muted);font-size:11px;font-family:var(--body)}
+.chart rect.col{fill:var(--jade)}
+.chart g.hit:hover rect.col,.chart g.hit:focus rect.col{fill:var(--ink)}
+.chart g.hit:focus{outline:none}
+.chart rect.hitbox{fill:transparent}
+.hbars{display:grid;gap:8px}
+.hbar{display:grid;grid-template-columns:96px 1fr 92px;gap:10px;align-items:center;font-size:14px}
+.hbar .track{height:10px;background:var(--line);border-radius:5px;overflow:hidden}
+.hbar .fill{height:100%;background:var(--jade);border-radius:0 4px 4px 0}
+.hbar .v{font-variant-numeric:tabular-nums;text-align:right;color:var(--ink)}
+.hbar .v small{color:var(--muted)}
+.chip{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:700;padding:2px 9px;border-radius:999px;margin:2px 4px 2px 0;white-space:nowrap}
+.chip.idle{background:var(--line);color:var(--ink)}
+.chip.stuck{background:var(--gold-soft);color:var(--gold)}
+.chip.drop{background:var(--seal-soft);color:var(--seal)}
+.chip.guess{background:var(--seal-soft);color:var(--seal)}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--paper);font-size:13px;padding:6px 10px;border-radius:8px;z-index:30;white-space:nowrap;line-height:1.4}
+.vs{color:var(--muted);padding:0 6px}
+@media (max-width:760px){.an-grid{grid-template-columns:1fr}.hbar{grid-template-columns:80px 1fr 80px}}
+
 /* 首三名：金銀銅牌 */
 .podium{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
 .podium .card{display:flex;gap:14px;align-items:center;padding:14px 16px;border-width:1.5px}
@@ -220,7 +251,7 @@ const S = {
   idioms:[], idiomsLoaded:false, loadErr:'',
   me:null, myRows:[], my:null,
   pw:null, teacherLoaded:false, all:[], tLoading:false,
-  view:'learn', quiz:null, tSub:'students', openStudent:null, filter:'', cat:'',
+  view:'learn', quiz:null, tSub:'analysis', aCls:'', aDays:30, openStudent:null, filter:'', cat:'',
   practiceMode:'mix', practiceCat:'', practiceCount:10, offline:false, top:null
 };
 const MAX_RECENT = 60;
@@ -425,7 +456,8 @@ async function flush(){
 }
 function recordAnswer(q, ok, chosen){
   const z = S.quiz || {};
-  pending.push({t:Date.now(), sid:S.me.sid, pin:S.me.pin, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen, lv:z.level||'', ss:z.ss||''});
+  const sec = z.qStart ? Math.round((Date.now()-z.qStart)/100)/10 : 0;
+  pending.push({t:Date.now(), sec, sid:S.me.sid, pin:S.me.pin, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen, lv:z.level||'', ss:z.ss||''});
   store.set('cy_pending', pending);
   rebuildMy(); flush();
 }
@@ -532,6 +564,7 @@ async function takeName(){
   loggingIn = true;
   try {
     const r = await apiPost({action:'studentLogin', cls, name, pin});
+    if (!r.ver){ toast('網站後端仍是舊版，請通知老師更新 Apps Script（部署新版本）'); return false; }
     if (!r.ok){ toast(r.error || '未能登入'); pn.value=''; pn.focus(); return false; }
     S.me = {name:r.name, cls:r.cls, sid:r.sid, pin}; store.set('cy_me', S.me);
     toast(r.isNew ? '已設定你的密碼，請記住它！' : `歡迎回來，${r.name}！`);
@@ -576,7 +609,7 @@ function startChallenge(n){
   if (!levelOpen(n)) return;
   const pool = levelIdioms(n);
   if (pool.length < 1) return;
-  S.quiz = {qs:buildQuestions(pool, lvPlan(n), 'mix'), i:0, score:0, answered:null, log:[], level:n, ss:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)};
+  S.quiz = {qs:buildQuestions(pool, lvPlan(n), 'mix'), i:0, score:0, answered:null, log:[], level:n, qStart:Date.now(), ss:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)};
   render(); window.scrollTo(0,0);
 }
 function buildQuestions(pool, n, mode){
@@ -607,7 +640,7 @@ async function startQuiz(ev){
   if (S.practiceMode==='wrong'){ const bi=S.my.byIdiom; pool = pool.filter(i=>bi[i.id] && isWeak(bi[i.id])); }
   if (S.practiceMode==='sentence') pool = pool.filter(i=>i.example && i.example.includes(i.word));
   if (!pool.length){ toast(S.practiceMode==='sentence'?'未有成語附有例句，請選其他題型':'這個選擇沒有可用的成語'); render(); return; }
-  S.quiz = {qs:buildQuestions(pool, S.practiceCount, S.practiceMode), i:0, score:0, answered:null, log:[]};
+  S.quiz = {qs:buildQuestions(pool, S.practiceCount, S.practiceMode), i:0, score:0, answered:null, log:[], qStart:Date.now()};
   render();
 }
 function quizQuestion(){
@@ -641,7 +674,7 @@ function answer(idx){
   recordAnswer(q, ok, chosen);
   render(); const nb=$('#nextBtn'); if(nb) nb.focus();
 }
-function nextQ(){ const z=S.quiz; z.answered=null; z.i++; if (z.i>=z.qs.length){ z.done=true; setTimeout(loadTop, 2500); } render(); }
+function nextQ(){ const z=S.quiz; z.answered=null; z.i++; z.qStart=Date.now(); if (z.i>=z.qs.length){ z.done=true; setTimeout(loadTop, 2500); } render(); }
 function quizResult(){
   const z=S.quiz, wrong=z.log.filter(l=>!l.ok);
   if (z.level) return challengeResult(z, wrong);
@@ -711,7 +744,7 @@ async function loadTeacher(){
     if (!r.ok){ if (r.auth || /密碼/.test(r.error||'')){ S.pw=null; try{sessionStorage.removeItem('cy_pw')}catch(e){} S.tErr=r.error; } else toast('載入失敗：'+r.error); }
     else {
       S.idioms = r.idioms.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); store.set('cy_idioms', S.idioms);
-      S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now(); S.tErr='';
+      S.log = r.log; S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now(); S.tErr=''; S.oldApi = !r.ver;
       S.registered = Object.fromEntries((r.students||[]).map(x=>[x.sid,x]));
       // 已登記但未作答的學生也列出
       for (const x of (r.students||[])) if (!S.all.some(s=>s.id===x.sid)) S.all.push({id:x.sid, name:x.name, cls:x.cls, total:0, correct:0, lastAt:0, sessions:0, byIdiom:{}, recent:[], levels:{}});
@@ -728,15 +761,15 @@ function teacherLogin(ev){
 function teacherLogout(){ S.pw=null; S.teacherLoaded=false; S.all=[]; try{sessionStorage.removeItem('cy_pw')}catch(e){} render(); }
 function viewTeacher(){
   if (!API) return '<div class="card empty">未設定後端。</div>';
-  if (!S.pw) return `<form class="card setup" onsubmit="teacherLogin(event)" style="margin:0 auto">
+  if (!S.pw) return `${S.oldApi?'<div class="banner err">Apps Script 仍是舊版程式：學生將無法登入。請貼上新的 Code.gs，再按「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。</div>':''}<form class="card setup" onsubmit="teacherLogin(event)" style="margin:0 auto">
     <h2 style="font-size:22px">老師登入</h2>
     ${S.tErr?`<div class="banner err" style="margin:0">${esc(S.tErr)}</div>`:''}
     <label class="f"><span>老師密碼</span><input type="password" id="tpw" required autocomplete="current-password"></label>
     <div><button class="btn primary" type="submit">登入</button></div></form>`;
   if (!S.teacherLoaded) return `<div class="empty">${S.tLoading?'正在讀取試算表…':'未能載入。'}</div>`;
   const sub = S.tSub;
-  const tabs = [['students','學生情況'],['levels','闖關進度'],['idioms','成語庫'],['hard','成語難度']];
-  const body = sub==='idioms' ? teacherIdioms() : sub==='hard' ? teacherHard() : sub==='levels' ? teacherLevels() : teacherStudents();
+  const tabs = [['analysis','分析'],['students','學生情況'],['levels','闖關進度'],['idioms','成語庫'],['hard','成語難度']];
+  const body = sub==='idioms' ? teacherIdioms() : sub==='hard' ? teacherHard() : sub==='levels' ? teacherLevels() : sub==='analysis' ? teacherAnalysis() : teacherStudents();
   return `<div class="section-head"><div><h2>老師後台</h2><div class="sub">資料更新於 ${fmtTime(S.loadedAt)}</div></div>
     <div class="row"><button class="btn small" onclick="loadTeacher()" ${S.tLoading?'disabled':''}>${S.tLoading?'更新中…':'重新整理'}</button><button class="btn small" onclick="teacherLogout()">登出</button></div></div>
   <div class="subtabs">${tabs.map(([k,l])=>`<button aria-pressed="${sub===k}" onclick="S.tSub='${k}';S.openStudent=null;render()">${l}</button>`).join('')}</div>${body}`;
@@ -754,6 +787,7 @@ function teacherStudents(){
     <div class="tile"><div class="n">${tot}</div><div class="l">總作答題數</div></div>
     <div class="tile"><div class="n">${pct(cor,tot)}%</div><div class="l">整體正確率</div></div>
   </div>
+  ${S.oldApi?'<div class="banner err">Apps Script 仍是舊版程式，學生無法用密碼登入。請貼上新的 Code.gs 和 appsscript.json，執行 setup，再按「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。</div>':''}
   ${S.topMissing?'<div class="banner err">Google Apps Script 仍是舊版程式，學生在首頁看不到首三名。請把新的 Code.gs 貼上，再按「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。</div>':''}
   ${podiumHtml(topFromAll(),'首三名（學生在首頁會看到）')}
   ${st.length?`<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="sub">按一行看該學生的詳細紀錄</span><button class="btn small" onclick="downloadCsv()">下載成績 (CSV)</button></div>
@@ -811,6 +845,131 @@ function downloadCsv(){
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
   const d=new Date(); a.download=`成語練習成績_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+/* ---------- 分析 ---------- */
+const DAY = 864e5;
+const classOf = cls => { const c=String(cls||'').toUpperCase().replace(/\s+/g,' ').trim(); const m=c.match(/^([1-6])\s*([A-Z])/); return m ? m[1]+m[2] : (c.split(' ')[0] || '未分班'); };
+const median = a => { if (!a.length) return 0; const b=a.slice().sort((x,y)=>x-y), k=b.length>>1; return b.length%2?b[k]:(b[k-1]+b[k])/2; };
+const MODE_KEYS = Object.keys(MODE_NAMES);
+function anRows(){
+  const since = S.aDays ? Date.now()-S.aDays*DAY : 0;
+  return (S.log||[]).filter(r=>r.t>=since && (!S.aCls || classOf(r.cls)===S.aCls));
+}
+function tipOn(el, html){ el.addEventListener('mouseenter',e=>showTip(e,html)); el.addEventListener('mousemove',moveTip); el.addEventListener('mouseleave',hideTip); el.addEventListener('focus',e=>showTip(e,html)); el.addEventListener('blur',hideTip); }
+let tipEl=null;
+function showTip(e, html){ tipEl ||= Object.assign(document.createElement('div'),{className:'tip'}); document.body.appendChild(tipEl); tipEl.innerHTML=html; moveTip(e); }
+function moveTip(e){ if(!tipEl) return; const r=e.target.getBoundingClientRect(); const x=e.clientX||r.left+r.width/2, y=e.clientY||r.top; tipEl.style.left=Math.min(window.innerWidth-tipEl.offsetWidth-8, x+12)+'px'; tipEl.style.top=(y-tipEl.offsetHeight-10)+'px'; }
+function hideTip(){ if (tipEl) tipEl.remove(); }
+
+/* 每日作答柱狀圖（單一數列，SVG） */
+function dailyChart(rows){
+  const days = S.aDays || Math.max(7, Math.ceil((Date.now()-Math.min(...rows.map(r=>r.t), Date.now()))/DAY)+1);
+  const n = Math.min(days, 60);
+  const start = new Date(); start.setHours(0,0,0,0); start.setDate(start.getDate()-(n-1));
+  const buckets = Array.from({length:n},(_,i)=>({d:new Date(start.getTime()+i*DAY), c:0, ok:0, who:new Set()}));
+  rows.forEach(r=>{ const k=Math.floor((r.t-start.getTime())/DAY); if (k>=0&&k<n){ const b=buckets[k]; b.c++; if(r.ok) b.ok++; b.who.add(r.sid); } });
+  const max = Math.max(4, ...buckets.map(b=>b.c));
+  const step = max<=10?2: max<=50?10: max<=200?50: max<=1000?200:1000, top=Math.ceil(max/step)*step;
+  const W=640,H=200,L=34,R=8,T=10,B=24, pw=(W-L-R)/n, bw=Math.max(2,Math.min(22,pw-2));
+  const y=v=>T+(H-T-B)*(1-v/top);
+  let g=''; for(let v=0;v<=top;v+=step) g+=`<line x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"/>`;
+  let ax=''; for(let v=0;v<=top;v+=step) ax+=`<text x="${L-6}" y="${y(v)+4}" text-anchor="end">${v}</text>`;
+  const every = n<=10?1: n<=31?7: 14;
+  buckets.forEach((b,i)=>{ if ((i%every===0 && (n-1-i>=every/2 || i===n-1)) || i===n-1) ax+=`<text x="${L+pw*i+pw/2}" y="${H-6}" text-anchor="middle">${b.d.getMonth()+1}/${b.d.getDate()}</text>`; });
+  const bars = buckets.map((b,i)=>{ const x=L+pw*i+(pw-bw)/2, h=Math.max(0,y(0)-y(b.c));
+    const path = h>0 ? `<rect class="col" x="${x}" y="${y(b.c)}" width="${bw}" height="${h}" rx="${Math.min(4,bw/2)}"/>` : '';
+    return `<g class="hit" data-i="${i}" tabindex="0"><rect class="hitbox" x="${L+pw*i}" y="${T}" width="${pw}" height="${H-T-B}"/>${path}</g>`; }).join('');
+  const total = rows.length, act = new Set(rows.map(r=>r.sid)).size;
+  setTimeout(()=>document.querySelectorAll('#dailyChart g.hit').forEach(el=>{ const b=buckets[+el.dataset.i];
+    tipOn(el, `<b>${b.d.getMonth()+1}月${b.d.getDate()}日</b><br>作答 ${b.c} 題 · 答對 ${pct(b.ok,b.c)}%<br>練習學生 ${b.who.size} 人`); }),0);
+  return `<div class="chart" id="dailyChart" role="img" aria-label="最近 ${n} 日每日作答題數，共 ${total} 題，${act} 位學生">
+    <svg viewBox="0 0 ${W} ${H}"><g class="grid">${g}</g><g class="axis">${ax}</g>${bars}</svg></div>`;
+}
+function hbars(items, fmt){
+  if (!items.length) return '<div class="sub">未有資料</div>';
+  return `<div class="hbars">${items.map(it=>`<div class="hbar"><span>${esc(it.label)}</span><div class="track" title="${esc(it.label)}：${it.v}%"><div class="fill" style="width:${Math.max(1,it.v)}%"></div></div><span class="v">${fmt(it)}</span></div>`).join('')}</div>`;
+}
+function watchList(rows){
+  const now=Date.now(), out=[];
+  const byStu = {}; (S.log||[]).forEach(r=>{ if (!S.aCls || classOf(r.cls)===S.aCls) (byStu[r.sid] ||= []).push(r); });
+  const ls = levelList();
+  for (const s of S.all){
+    if (S.aCls && classOf(s.cls)!==S.aCls) continue;
+    const rs = (byStu[s.id]||[]).slice().sort((a,b)=>a.t-b.t), flags=[];
+    if (!rs.length){ flags.push(['idle','未開始練習']); }
+    else if (now - rs[rs.length-1].t > 7*DAY) flags.push(['idle',`${Math.floor((now-rs[rs.length-1].t)/DAY)} 日沒有練習`]);
+    for (const n of ls){ const L=s.levels&&s.levels[n]; if (L && !L.passed && L.tries>=3) flags.push(['stuck',`${lvTitle(n)}失敗 ${L.tries} 次`]); }
+    if (rs.length>=40){ const last=rs.slice(-20), prev=rs.slice(0,-20); const a1=pct(last.filter(r=>r.ok).length,last.length), a0=pct(prev.filter(r=>r.ok).length,prev.length);
+      if (a0-a1>=15) flags.push(['drop',`正確率由 ${a0}% 跌至 ${a1}%`]); }
+    const timed = rs.slice(-20).filter(r=>r.sec>0);
+    if (timed.length>=10){ const md=median(timed.map(r=>r.sec)), acc=pct(timed.filter(r=>r.ok).length,timed.length);
+      if (md<2.5 && acc<50) flags.push(['guess',`每題約 ${md.toFixed(1)} 秒，正確率 ${acc}%`]); }
+    if (flags.length) out.push({s, flags, last: rs.length?rs[rs.length-1].t:0});
+  }
+  const rank = f => f.some(x=>x[0]==='drop'||x[0]==='guess')?0 : f.some(x=>x[0]==='stuck')?1 : 2;
+  return out.sort((a,b)=>rank(a.flags)-rank(b.flags) || (a.s.cls||'').localeCompare(b.s.cls||'','zh-Hant',{numeric:true}));
+}
+function confusions(rows){
+  const m={};
+  rows.filter(r=>!r.ok && r.a && r.w).forEach(r=>{ const k=r.w+'\u0001'+r.a; const x = m[k] ||= {w:r.w, a:r.a, n:0, who:new Set(), modes:{}}; x.n++; x.who.add(r.sid); x.modes[r.m]=(x.modes[r.m]||0)+1; });
+  return Object.values(m).filter(x=>x.n>=2).sort((a,b)=>b.who.size-a.who.size || b.n-a.n).slice(0,15);
+}
+function teacherAnalysis(){
+  const all = S.log||[];
+  if (!all.length) return '<div class="card empty">仍未有作答紀錄。學生開始練習後，這裡會顯示分析。</div>';
+  const classes = [...new Set(S.all.map(s=>classOf(s.cls)))].sort((a,b)=>a.localeCompare(b,'zh-Hant',{numeric:true}));
+  const rows = anRows(), timed = rows.filter(r=>r.sec>0);
+  const filters = `<div class="an-filters">
+    <label>班別<select onchange="S.aCls=this.value;render()"><option value="">全部班別</option>${classes.map(c=>`<option ${c===S.aCls?'selected':''}>${esc(c)}</option>`).join('')}</select></label>
+    <label>時段<select onchange="S.aDays=+this.value;render()">${[[7,'最近 7 日'],[30,'最近 30 日'],[90,'最近 90 日'],[0,'全部']].map(([v,l])=>`<option value="${v}" ${v===S.aDays?'selected':''}>${l}</option>`).join('')}</select></label>
+    <span class="sub" style="margin-left:auto">${rows.length} 題作答 · ${new Set(rows.map(r=>r.sid)).size} 位學生</span></div>`;
+
+  // 1. class comparison
+  const week = Date.now()-7*DAY, ls = levelList();
+  const clsRows = classes.filter(c=>!S.aCls||c===S.aCls).map(c=>{
+    const stu = S.all.filter(s=>classOf(s.cls)===c), rr = rows.filter(r=>classOf(r.cls)===c), tt=rr.filter(r=>r.sec>0);
+    const active = new Set((S.log||[]).filter(r=>classOf(r.cls)===c && r.t>=week).map(r=>r.sid)).size;
+    const passAvg = stu.length ? stu.reduce((a,s)=>a+ls.filter(n=>s.levels&&s.levels[n]&&s.levels[n].passed).length,0)/stu.length : 0;
+    return {c, n:stu.length, active, answers:rr.length, acc:pct(rr.filter(r=>r.ok).length, rr.length), pass:passAvg, sec: tt.length?median(tt.map(r=>r.sec)):0};
+  });
+  const classTable = `<div class="tablebox"><table><thead><tr><th>班別</th><th>學生</th><th>近 7 日有練習</th><th>作答題數</th><th>正確率</th>${ls.length?'<th>平均過關數</th>':''}<th>每題用時（中位數）</th></tr></thead><tbody>
+    ${clsRows.map(x=>`<tr><td><b>${esc(x.c)}</b></td><td class="num">${x.n}</td><td class="num">${x.active} <span class="sub">(${pct(x.active,x.n)}%)</span></td><td class="num">${x.answers}</td>
+      <td class="num">${x.answers?`<span class="bar"><i style="width:${x.acc}%;background:${x.acc>=70?'var(--jade)':x.acc>=50?'var(--gold)':'var(--seal)'}"></i></span>${x.acc}%`:'—'}</td>
+      ${ls.length?`<td class="num">${x.pass.toFixed(1)} / ${ls.length}</td>`:''}<td class="num">${x.sec?x.sec.toFixed(1)+' 秒':'<span class="sub">未有數據</span>'}</td></tr>`).join('')}
+  </tbody></table></div>`;
+
+  // 2. categories & question types
+  const catAgg = {}; rows.forEach(r=>{ const i=byId(r.i); const c=(i&&i.category)||'未分類'; const x=catAgg[c] ||= {c:0,n:0}; x.n++; if(r.ok) x.c++; });
+  const cats = Object.entries(catAgg).filter(([,x])=>x.n>=3).map(([k,x])=>({label:k, v:pct(x.c,x.n), n:x.n})).sort((a,b)=>a.v-b.v);
+  const types = MODE_KEYS.map(k=>{ const rr=rows.filter(r=>r.m===MODE_NAMES[k]); const tt=rr.filter(r=>r.sec>0); return {label:MODE_NAMES[k].replace(' 選成語',''), v:pct(rr.filter(r=>r.ok).length, rr.length), n:rr.length, sec:tt.length?median(tt.map(r=>r.sec)):0}; }).filter(x=>x.n);
+
+  // 3. watch list
+  const watch = watchList(rows);
+  const chipCount = k => watch.filter(w=>w.flags.some(f=>f[0]===k)).length;
+  const watchHtml = watch.length ? `<div class="row" style="gap:6px;margin-bottom:10px">
+      <span class="chip drop">退步 ${chipCount('drop')}</span><span class="chip guess">可能亂猜 ${chipCount('guess')}</span><span class="chip stuck">卡關 ${chipCount('stuck')}</span><span class="chip idle">未有練習 ${chipCount('idle')}</span></div>
+    <div class="tablebox"><table><thead><tr><th>班別學號</th><th>姓名</th><th>需要留意</th><th>最後練習</th></tr></thead><tbody>
+    ${watch.map(w=>`<tr class="click" tabindex="0" onclick="S.tSub='students';S.openStudent='${esc(w.s.id)}';render()" onkeydown="if(event.key==='Enter'){S.tSub='students';S.openStudent='${esc(w.s.id)}';render()}">
+      <td>${esc(w.s.cls)}</td><td>${esc(w.s.name)}</td><td>${w.flags.map(f=>`<span class="chip ${f[0]}">${esc(f[1])}</span>`).join('')}</td><td class="num">${ago(w.last)}</td></tr>`).join('')}
+    </tbody></table></div>` : '<div class="sub">暫時沒有需要特別留意的學生。</div>';
+
+  // 4. confusions
+  const conf = confusions(rows);
+  const confHtml = conf.length ? `<div class="tablebox"><table><thead><tr><th>正確成語</th><th>學生常選錯為</th><th>學生人數</th><th>次數</th><th>題型</th></tr></thead><tbody>
+    ${conf.map(x=>{ const isChar=[...x.a].length===1; return `<tr><td class="ws">${esc(x.w)}</td><td class="ws">${isChar?`「${esc(x.a)}」<span class="sub" style="font-family:var(--body);font-weight:400">（寫錯字）</span>`:esc(x.a)}</td>
+      <td class="num">${x.who.size}</td><td class="num">${x.n}</td><td class="sub">${Object.keys(x.modes).map(esc).join('、')}</td></tr>`; }).join('')}
+    </tbody></table></div>` : '<div class="sub">未有同一個錯誤出現兩次或以上。</div>';
+
+  return `${filters}
+  <div class="an-card an-wide"><h3>需要留意的學生</h3><p class="desc">退步：最近 20 題比之前低 15 分以上 · 可能亂猜：每題少於 2.5 秒而正確率低於 50% · 卡關：同一關失敗 3 次 · 未有練習：7 日或以上。按一行看該學生詳細紀錄。</p>${watchHtml}</div>
+  <div class="an-card an-wide"><h3>每日作答</h3><p class="desc">每條柱代表一日的作答題數，指着柱可看當日正確率和練習人數。</p>${dailyChart(rows)}</div>
+  <div class="an-card an-wide"><h3>班別比較</h3><p class="desc">「近 7 日有練習」及「平均過關數」不受時段篩選影響。</p>${classTable}</div>
+  <div class="an-grid">
+    <div class="an-card"><h3>各分類正確率</h3><p class="desc">由弱至強排列（至少 3 題作答才列出）。</p>${hbars(cats, it=>`${it.v}% <small>· ${it.n} 題</small>`)}</div>
+    <div class="an-card"><h3>各題型表現</h3><p class="desc">「補缺字」偏低：明白意思但寫不出字；「例句填空」偏低：懂意思但不會運用。</p>${hbars(types, it=>`${it.v}% <small>· ${it.sec?it.sec.toFixed(1)+'秒':it.n+' 題'}</small>`)}
+      ${timed.length?'':'<p class="sub" style="margin:10px 0 0">用時數據會由這次更新後開始記錄。</p>'}</div>
+  </div>
+  <div class="an-card an-wide"><h3>常見混淆</h3><p class="desc">學生最常把哪個成語錯選成哪個答案，按涉及學生人數排列。適合在堂上比較兩個成語的分別。</p>${confHtml}</div>`;
 }
 function teacherLevels(){
   const ls = levelList();

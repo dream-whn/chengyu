@@ -17,7 +17,7 @@ const SHEET_LOG = '作答紀錄';
 const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間', '級別', '錄音'];
 const SHEET_STU = '學生';
 const STU_HEAD = ['學生編號', '班別學號', '姓名', '密碼雜湊', '建立時間'];
-const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案', '關卡', '場次'];
+const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案', '關卡', '場次', '用時(秒)'];
 
 /* ---------- 初次設定 ---------- */
 function setup() {
@@ -166,7 +166,8 @@ function checkStudent_(sid, pin, map) {
   if (!st) return { err: '找不到這位學生，請重新登入' };
   const c = CacheService.getScriptCache(), k = failKey_(sid), f = Number(c.get(k) || 0);
   if (f >= 5) return { err: '密碼錯誤太多次，請 10 分鐘後再試，或請老師重設密碼' };
-  if (hashPin_(sid, String(pin || '')) !== st.hash) { c.put(k, String(f + 1), 600); return { err: '密碼不正確' }; }
+  const h = hashPin_(sid, String(pin || ''));
+  if (st.hash !== 'h:' + h && st.hash !== h) { c.put(k, String(f + 1), 600); return { err: '密碼不正確' }; }
   if (f) c.remove(k);
   return { st: st };
 }
@@ -178,7 +179,9 @@ function studentLogin_(cls, name, pin) {
   const sid = sidOf_(cls, name);
   const map = students_();
   if (!map[sid]) {
-    stuSheet_().appendRow([sid, cls, name, hashPin_(sid, String(pin)), new Date()]);
+    const ss = stuSheet_(), row = ss.getLastRow() + 1;
+    ss.getRange(row, 1, 1, 4).setNumberFormat('@');   // 純文字，避免 4B/12 之類被當成日期
+    ss.getRange(row, 1, 1, 5).setValues([[sid, cls, name, 'h:' + hashPin_(sid, String(pin)), new Date()]]);
     return { ok: true, sid: sid, cls: cls, name: name, isNew: true };
   }
   const r = checkStudent_(sid, pin, map);
@@ -272,7 +275,7 @@ function readLog_() {
   return s.getRange(2, 1, n, LOG_HEAD.length).getValues().map(r => ({
     t: r[0] instanceof Date ? r[0].getTime() : Number(r[0]) || 0,
     sid: String(r[1]), cls: String(r[2]), name: String(r[3]), i: String(r[4]), w: String(r[5]),
-    m: String(r[6]), ok: r[7] === '對' ? 1 : 0, a: String(r[8]), lv: Number(r[9]) || 0, ss: String(r[10] || '')
+    m: String(r[6]), ok: r[7] === '對' ? 1 : 0, a: String(r[8]), lv: Number(r[9]) || 0, ss: String(r[10] || ''), sec: Number(r[11]) || 0
   }));
 }
 
@@ -298,7 +301,9 @@ function top_(n) {
 }
 
 /* ---------- 網頁入口 ---------- */
+const API_VERSION = 5;
 function out_(obj) {
+  obj.ver = API_VERSION;
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
@@ -319,6 +324,7 @@ function doPost(e) {
   lock.waitLock(20000);
   try {
     if (b.action === 'answers') return out_(saveAnswers_(b.rows || []));
+    if (b.action === 'teacherData') ensureHeaders_();
     if (b.action === 'studentLogin') return out_(studentLogin_(b.cls, b.name, b.pin));
     if (b.action === 'myRecord') {
       const r = checkStudent_(String(b.sid || ''), b.pin);
@@ -358,7 +364,7 @@ function saveAnswers_(rows) {
   const rejected = rows.length - good.length;
   if (!good.length) return { ok: true, saved: 0, rejected: rejected };
   const vals = good.map(r => { const st = okSid[String(r.sid)]; return [new Date(Number(r.t) || Date.now()), clean_(st.sid, 80), clean_(st.cls, 20), clean_(st.name, 30),
-    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20), Number(r.lv) || '', clean_(r.ss, 40)]; });
+    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20), Number(r.lv) || '', clean_(r.ss, 40), (Number(r.sec) > 0 ? Math.min(600, Math.round(Number(r.sec) * 10) / 10) : '')]; });
   const s = sheet_(SHEET_LOG);
   s.getRange(s.getLastRow() + 1, 1, vals.length, LOG_HEAD.length).setValues(vals);
   return { ok: true, saved: vals.length, rejected: rejected };
