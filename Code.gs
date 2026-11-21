@@ -5,18 +5,30 @@
  * 3. 部署 → 新增部署作業 → 網頁應用程式（執行身分：我；存取權：所有人）
  * 已經用緊舊版？選擇函式「assignLevels」執行一次，就會加上「級別」欄並把 100 個成語分成 5 關。
  * 要加例句？選擇函式「addExamples」執行一次，會為 100 個成語填上例句（已有例句的不會被覆蓋）。
- * 要用錄音功能？更新程式後再執行一次「setup」，按提示允許存取 Google 雲端硬碟（錄音會存在「成語練習室錄音」資料夾）。
+ * 要用錄音功能？更新程式後再執行一次「setup」，按提示允許存取（只限本程式自己建立的檔案）。
  */
-const TEACHER_PASSWORD = '老師密碼';
+const TEACHER_PASSWORD = '請改成你的密碼';
+// 執行 setup 後密碼會存入「專案屬性」，之後更新 Code.gs 時第 7 行可以保留「請改成你的密碼」，
+// 這樣即使 Code.gs 被放上 GitHub 也不會洩露密碼。要改密碼：改第 7 行，再執行一次 setup。
+const PW_PLACEHOLDER = '請改成你的密碼';
 
 const SHEET_IDIOMS = '成語';
 const SHEET_LOG = '作答紀錄';
 const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間', '級別', '錄音'];
+const SHEET_STU = '學生';
+const STU_HEAD = ['學生編號', '班別學號', '姓名', '密碼雜湊', '建立時間'];
 const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案', '關卡', '場次'];
 
 /* ---------- 初次設定 ---------- */
 function setup() {
   const ss = SpreadsheetApp.getActive();
+  if (TEACHER_PASSWORD !== PW_PLACEHOLDER) {
+    PropertiesService.getScriptProperties().setProperty('TEACHER_PASSWORD', String(TEACHER_PASSWORD));
+    Logger.log('老師密碼已儲存。為安全起見，可以把第 7 行改回「請改成你的密碼」。');
+  } else if (!teacherPw_()) {
+    Logger.log('⚠ 仍未設定老師密碼：請修改第 7 行，再執行一次 setup。');
+  }
+  stuSheet_();
   let s = ss.getSheetByName(SHEET_IDIOMS) || ss.insertSheet(SHEET_IDIOMS);
   if (s.getLastRow() === 0) {
     s.appendRow(IDIOM_HEAD);
@@ -34,16 +46,41 @@ function setup() {
   audioFolder_(); // 第一次會要求存取雲端硬碟的權限
 }
 
-/* ---------- 錄音（存在雲端硬碟） ---------- */
+/* ---------- 錄音（存在雲端硬碟；只可存取本程式自己建立的檔案） ---------- */
+const DRIVE_FILES = 'https://www.googleapis.com/drive/v3/files';
+function driveFetch_(url, opt) {
+  opt = opt || {};
+  opt.headers = Object.assign({ Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, opt.headers || {});
+  opt.muteHttpExceptions = true;
+  const r = UrlFetchApp.fetch(url, opt);
+  if (r.getResponseCode() >= 300) throw new Error('雲端硬碟錯誤 ' + r.getResponseCode() + '：' + r.getContentText().slice(0, 200));
+  return r;
+}
 function audioFolder_() {
   const props = PropertiesService.getScriptProperties();
-  const id = props.getProperty('AUDIO_FOLDER');
-  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
-  const f = DriveApp.createFolder('成語練習室錄音');
-  props.setProperty('AUDIO_FOLDER', f.getId());
-  return f;
+  const id = props.getProperty('AUDIO_FOLDER2');
+  if (id) {
+    try { const j = JSON.parse(driveFetch_(DRIVE_FILES + '/' + id + '?fields=id,trashed').getContentText()); if (!j.trashed) return id; } catch (e) {}
+  }
+  const j = JSON.parse(driveFetch_(DRIVE_FILES + '?fields=id', { method: 'post', contentType: 'application/json',
+    payload: JSON.stringify({ name: '成語練習室錄音', mimeType: 'application/vnd.google-apps.folder' }) }).getContentText());
+  props.setProperty('AUDIO_FOLDER2', j.id);
+  return j.id;
 }
-function trashFile_(fid) { if (fid) { try { DriveApp.getFileById(fid).setTrashed(true); } catch (e) {} } }
+function uploadFile_(name, mime, bytes) {
+  const boundary = 'cy' + Date.now();
+  const head = '--' + boundary + '\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n' +
+    JSON.stringify({ name: name, parents: [audioFolder_()], mimeType: mime }) +
+    '\r\n--' + boundary + '\r\nContent-Type: ' + mime + '\r\n\r\n';
+  const payload = Utilities.newBlob(head).getBytes().concat(bytes).concat(Utilities.newBlob('\r\n--' + boundary + '--').getBytes());
+  const r = driveFetch_('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id',
+    { method: 'post', contentType: 'multipart/related; boundary=' + boundary, payload: payload });
+  return JSON.parse(r.getContentText()).id;
+}
+function trashFile_(fid) {
+  if (!fid) return;
+  try { driveFetch_(DRIVE_FILES + '/' + encodeURIComponent(fid), { method: 'patch', contentType: 'application/json', payload: JSON.stringify({ trashed: true }) }); } catch (e) {}
+}
 
 function saveAudio_(id, mime, data, ext) {
   if (!data) return { ok: false, error: '沒有錄音內容' };
@@ -53,11 +90,11 @@ function saveAudio_(id, mime, data, ext) {
   if (at < 0) return { ok: false, error: '找不到這個成語' };
   const word = String(s.getRange(at, 2).getValue());
   const safeExt = String(ext || 'wav').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'wav';
-  const blob = Utilities.newBlob(Utilities.base64Decode(data), String(mime || 'audio/wav'), word + '.' + safeExt);
-  const file = audioFolder_().createFile(blob);
+  const safeMime = /^audio\/[a-z0-9.+-]+$/i.test(String(mime)) ? String(mime) : 'audio/wav';
+  const fid = uploadFile_(word + '.' + safeExt, safeMime, Utilities.base64Decode(data));
   trashFile_(String(s.getRange(at, 9).getValue()));
-  s.getRange(at, 9).setValue(file.getId());
-  return { ok: true, audio: file.getId() };
+  s.getRange(at, 9).setValue(fid);
+  return { ok: true, audio: fid };
 }
 function deleteAudio_(id) {
   const s = sheet_(SHEET_IDIOMS);
@@ -68,8 +105,91 @@ function deleteAudio_(id) {
 function getAudio_(fid) {
   // 只提供成語庫內登記了的錄音，不會讀取雲端硬碟的其他檔案
   if (!fid || !readIdioms_().some(x => x.audio === fid)) return { ok: false, error: '找不到錄音' };
-  const b = DriveApp.getFileById(fid).getBlob();
-  return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
+  const r = driveFetch_(DRIVE_FILES + '/' + encodeURIComponent(fid) + '?alt=media');
+  const h = r.getHeaders();
+  return { ok: true, mime: String(h['Content-Type'] || h['content-type'] || 'audio/wav').split(';')[0], data: Utilities.base64Encode(r.getContent()) };
+}
+
+/* ---------- 老師密碼（錯 5 次鎖 15 分鐘） ---------- */
+function teacherPw_() {
+  const p = PropertiesService.getScriptProperties().getProperty('TEACHER_PASSWORD');
+  if (p) return p;
+  return TEACHER_PASSWORD !== PW_PLACEHOLDER ? String(TEACHER_PASSWORD) : '';
+}
+function checkTeacher_(pw) {
+  const c = CacheService.getScriptCache();
+  const f = Number(c.get('tfail') || 0);
+  if (f >= 5) return '密碼錯誤太多次，後台已鎖定 15 分鐘';
+  const real = teacherPw_();
+  if (!real) return '未設定老師密碼：請在 Code.gs 第 7 行設定，再執行 setup';
+  if (String(pw || '') !== real) {
+    c.put('tfail', String(f + 1), 900);
+    return f + 1 >= 5 ? '密碼錯誤太多次，後台已鎖定 15 分鐘' : '密碼不正確（還有 ' + (4 - f) + ' 次機會）';
+  }
+  if (f) c.remove('tfail');
+  return '';
+}
+
+/* ---------- 學生 4 位數字密碼 ---------- */
+function stuSheet_() {
+  const ss = SpreadsheetApp.getActive();
+  let s = ss.getSheetByName(SHEET_STU);
+  if (!s) { s = ss.insertSheet(SHEET_STU); s.appendRow(STU_HEAD); s.setFrozenRows(1); }
+  return s;
+}
+function sidOf_(cls, name) { return (String(cls) + '|' + String(name)).replace(/\s+/g, '').toUpperCase(); }
+function salt_() {
+  const props = PropertiesService.getScriptProperties();
+  let v = props.getProperty('PIN_SALT');
+  if (!v) { v = Utilities.getUuid(); props.setProperty('PIN_SALT', v); }
+  return v;
+}
+function hashPin_(sid, pin) {
+  return Utilities.base64Encode(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, salt_() + '|' + sid + '|' + pin, Utilities.Charset.UTF_8));
+}
+function students_() {
+  const s = stuSheet_();
+  const n = s.getLastRow() - 1;
+  const map = {};
+  if (n < 1) return map;
+  s.getRange(2, 1, n, STU_HEAD.length).getValues().forEach((r, i) => {
+    if (String(r[0])) map[String(r[0])] = { row: i + 2, sid: String(r[0]), cls: String(r[1]), name: String(r[2]), hash: String(r[3]),
+      at: r[4] instanceof Date ? r[4].getTime() : 0 };
+  });
+  return map;
+}
+function failKey_(sid) {
+  return 'sf' + Utilities.base64EncodeWebSafe(Utilities.computeDigest(Utilities.DigestAlgorithm.MD5, sid, Utilities.Charset.UTF_8));
+}
+function checkStudent_(sid, pin, map) {
+  const st = (map || students_())[sid];
+  if (!st) return { err: '找不到這位學生，請重新登入' };
+  const c = CacheService.getScriptCache(), k = failKey_(sid), f = Number(c.get(k) || 0);
+  if (f >= 5) return { err: '密碼錯誤太多次，請 10 分鐘後再試，或請老師重設密碼' };
+  if (hashPin_(sid, String(pin || '')) !== st.hash) { c.put(k, String(f + 1), 600); return { err: '密碼不正確' }; }
+  if (f) c.remove(k);
+  return { st: st };
+}
+function studentLogin_(cls, name, pin) {
+  cls = String(cls || '').replace(/^[=+\-@\s]+/, '').trim().toUpperCase().slice(0, 20);
+  name = String(name || '').replace(/^[=+\-@\s]+/, '').trim().slice(0, 30);
+  if (!cls || !name) return { ok: false, error: '請填姓名和班別學號' };
+  if (!/^\d{4}$/.test(String(pin))) return { ok: false, error: '密碼要是 4 位數字' };
+  const sid = sidOf_(cls, name);
+  const map = students_();
+  if (!map[sid]) {
+    stuSheet_().appendRow([sid, cls, name, hashPin_(sid, String(pin)), new Date()]);
+    return { ok: true, sid: sid, cls: cls, name: name, isNew: true };
+  }
+  const r = checkStudent_(sid, pin, map);
+  if (r.err) return { ok: false, error: r.err };
+  return { ok: true, sid: sid, cls: r.st.cls, name: r.st.name };
+}
+function resetPin_(sid) {
+  const st = students_()[sid];
+  if (st) stuSheet_().deleteRow(st.row);
+  CacheService.getScriptCache().remove(failKey_(sid));
+  return { ok: true };
 }
 
 /* 舊版試算表補上新欄位標題 */
@@ -188,7 +308,6 @@ function doGet(e) {
     if (p.action === 'idioms') return out_({ ok: true, idioms: readIdioms_() });
     if (p.action === 'audio') return out_(getAudio_(p.f));
     if (p.action === 'top') return out_({ ok: true, top: top_(3) });
-    if (p.action === 'myRecord') return out_({ ok: true, rows: readLog_().filter(r => r.sid === p.sid) });
     return out_({ ok: true, hello: '成語練習室後端運作中' });
   } catch (err) { return out_({ ok: false, error: String(err) }); }
 }
@@ -200,10 +319,19 @@ function doPost(e) {
   lock.waitLock(20000);
   try {
     if (b.action === 'answers') return out_(saveAnswers_(b.rows || []));
-    if (b.pw !== TEACHER_PASSWORD) return out_({ ok: false, error: '密碼不正確' });
+    if (b.action === 'studentLogin') return out_(studentLogin_(b.cls, b.name, b.pin));
+    if (b.action === 'myRecord') {
+      const r = checkStudent_(String(b.sid || ''), b.pin);
+      if (r.err) return out_({ ok: false, error: r.err, auth: true });
+      return out_({ ok: true, rows: readLog_().filter(x => x.sid === r.st.sid) });
+    }
+    const bad = checkTeacher_(b.pw);
+    if (bad) return out_({ ok: false, error: bad, auth: true });
     switch (b.action) {
       case 'login': return out_({ ok: true });
-      case 'teacherData': return out_({ ok: true, idioms: readIdioms_(), log: readLog_() });
+      case 'teacherData': return out_({ ok: true, idioms: readIdioms_(), log: readLog_(),
+        students: Object.values(students_()).map(x => ({ sid: x.sid, cls: x.cls, name: x.name, at: x.at })) });
+      case 'resetPin': return out_(resetPin_(String(b.sid || '')));
       case 'saveIdiom': return out_(saveIdiom_(b.idiom));
       case 'deleteIdiom': return out_(deleteIdiom_(b.id));
       case 'bulkIdioms': return out_(bulkIdioms_(b.items || []));
@@ -221,11 +349,19 @@ function doPost(e) {
 function saveAnswers_(rows) {
   rows = rows.slice(0, 200);
   if (!rows.length) return { ok: true, saved: 0 };
-  const vals = rows.map(r => [new Date(Number(r.t) || Date.now()), clean_(r.sid, 80), clean_(r.cls, 20), clean_(r.name, 30),
-    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20), Number(r.lv) || '', clean_(r.ss, 40)]);
+  const map = students_(), okSid = {};
+  rows.forEach(r => {
+    const sid = String(r.sid || '');
+    if (okSid[sid] === undefined) okSid[sid] = checkStudent_(sid, r.pin, map).st || null;
+  });
+  const good = rows.filter(r => okSid[String(r.sid || '')]);
+  const rejected = rows.length - good.length;
+  if (!good.length) return { ok: true, saved: 0, rejected: rejected };
+  const vals = good.map(r => { const st = okSid[String(r.sid)]; return [new Date(Number(r.t) || Date.now()), clean_(st.sid, 80), clean_(st.cls, 20), clean_(st.name, 30),
+    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20), Number(r.lv) || '', clean_(r.ss, 40)]; });
   const s = sheet_(SHEET_LOG);
   s.getRange(s.getLastRow() + 1, 1, vals.length, LOG_HEAD.length).setValues(vals);
-  return { ok: true, saved: vals.length };
+  return { ok: true, saved: vals.length, rejected: rejected };
 }
 
 function findRow_(s, id) {

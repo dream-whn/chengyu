@@ -302,6 +302,7 @@ window.addEventListener('hashchange', route);
 /* ---------- 啟動 ---------- */
 async function init(){
   S.me = store.get('cy_me');
+  if (S.me && !S.me.pin){ S.me = null; store.set('cy_me', null); }   // 舊版沒有密碼，需要重新登入
   try { S.pw = sessionStorage.getItem('cy_pw'); } catch(e){}
   S.top = store.get('cy_top');
   const cached = store.get('cy_idioms');
@@ -364,7 +365,11 @@ function topFromAll(){
 }
 async function loadMyRecord(){
   if (!API || !S.me) return;
-  try { const r = await apiGet({action:'myRecord', sid:S.me.sid}); if (r.ok){ S.myRows = r.rows; rebuildMy(); softRender(); } } catch(e){}
+  try {
+    const r = await apiPost({action:'myRecord', sid:S.me.sid, pin:S.me.pin});
+    if (r.ok){ S.myRows = r.rows; rebuildMy(); softRender(); }
+    else if (r.auth){ toast(r.error + '，請重新登入'); logoutStudent(); }
+  } catch(e){}
 }
 
 /* 練習進行中時，資料更新不打斷題目 */
@@ -395,7 +400,7 @@ function aggregate(rows){
 const isWeak = b => b.w > b.c || b.last === 0;
 function rebuildMy(){
   if (!S.me){ S.my = null; return; }
-  const rows = S.myRows.concat(pending.filter(p=>p.sid===S.me.sid));
+  const rows = S.myRows.concat(pending.filter(p=>p.sid===S.me.sid));  // pin 只用於上載
   S.my = aggregate(rows)[0] || {id:S.me.sid, name:S.me.name, cls:S.me.cls, total:0, correct:0, sessions:0, byIdiom:{}, recent:[], levels:{}};
 }
 
@@ -408,7 +413,8 @@ async function flush(){
     const r = await apiPost({action:'answers', rows:batch});
     if (!r.ok) throw new Error(r.error);
     pending = pending.slice(batch.length); store.set('cy_pending', pending);
-    S.myRows = S.myRows.concat(batch.filter(b=>S.me && b.sid===S.me.sid));
+    if (r.rejected) toast(`有 ${r.rejected} 題紀錄因密碼不符未能儲存`);
+    if (!r.rejected) S.myRows = S.myRows.concat(batch.filter(b=>S.me && b.sid===S.me.sid).map(({pin,...x})=>x));
     if (S.offline){ S.offline=false; softRender(); }
   } catch(e){
     if (!S.offline){ S.offline=true; softRender(); }
@@ -419,7 +425,7 @@ async function flush(){
 }
 function recordAnswer(q, ok, chosen){
   const z = S.quiz || {};
-  pending.push({t:Date.now(), sid:S.me.sid, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen, lv:z.level||'', ss:z.ss||''});
+  pending.push({t:Date.now(), sid:S.me.sid, pin:S.me.pin, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen, lv:z.level||'', ss:z.ss||''});
   store.set('cy_pending', pending);
   rebuildMy(); flush();
 }
@@ -429,12 +435,13 @@ function renderHeader(){
   const tabs = [['learn','成語卡'],['challenge','闖關'],['practice','自由練習'],['record','我的紀錄']];
   if (S.pw || S.view==='teacher') tabs.push(['teacher','老師後台']);
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<a href="#${k}" class="${k==='teacher'?'teacher':''}" ${S.view===k?'aria-current="page"':''}>${l}</a>`).join('');
-  $('#who').innerHTML = S.me ? `${esc(S.me.cls)} ${esc(S.me.name)} <button class="btn small" onclick="changeMe()" style="margin-left:6px">不是我</button>` : '';
+  $('#who').innerHTML = S.me ? `${esc(S.me.cls)} ${esc(S.me.name)} <button class="btn small" onclick="changeMe()" style="margin-left:6px">登出</button>` : '';
 }
 function changeMe(){
   if (pending.length && S.offline){ toast('仍有紀錄未上載，請連上網絡後再轉換學生'); return; }
-  S.me=null; S.myRows=[]; store.set('cy_me', null); rebuildMy(); S.quiz=null; location.hash='#practice'; render();
+  logoutStudent(); location.hash='#learn'; render();
 }
+function logoutStudent(){ S.me=null; S.myRows=[]; store.set('cy_me', null); rebuildMy(); S.quiz=null; S.draftName=''; S.draftCls=''; }
 
 function render(){
   renderHeader();
@@ -510,15 +517,27 @@ function nameFields(){
   return `<div class="row" style="gap:12px">
       <label class="f" style="flex:1;min-width:140px"><span>姓名</span><input type="text" id="sname" required maxlength="30" placeholder="例如：陳小明" value="${esc(S.draftName||'')}"></label>
       <label class="f" style="width:150px"><span>班別及學號</span><input type="text" id="scls" required maxlength="20" placeholder="例如：4B 12" value="${esc(S.draftCls||'')}"></label>
-    </div><div class="sub" style="margin-top:-6px">每次都要用同一個寫法，老師才可以把你的紀錄放在一起。</div>`;
+      <label class="f" style="width:150px"><span>4 位數字密碼</span><input type="password" id="spin" required maxlength="4" inputmode="numeric" pattern="[0-9]{4}" autocomplete="off" placeholder="例如：2580"></label>
+    </div><div class="sub" style="margin-top:-6px">第一次使用時，你輸入的 4 位數字就是你的密碼，之後每次都要用同一個姓名、班別和密碼。忘記密碼請找老師重設。</div>`;
 }
-function takeName(){
-  const nm=$('#sname'), cl=$('#scls');
+let loggingIn = false;
+async function takeName(){
+  const nm=$('#sname'), cl=$('#scls'), pn=$('#spin');
   if (!nm) return !!S.me;
-  const name=nm.value.trim(), cls=cl.value.trim().toUpperCase();
+  const name=nm.value.trim(), cls=cl.value.trim().toUpperCase(), pin=pn.value.trim();
+  S.draftName=nm.value; S.draftCls=cl.value;
   if (!name || !cls){ toast('請先填姓名和班別學號'); return false; }
-  S.me = {name, cls, sid:keyOf(cls,name)}; store.set('cy_me', S.me);
-  rebuildMy(); loadMyRecord(); return true;
+  if (!/^\d{4}$/.test(pin)){ toast('密碼要是 4 位數字'); pn.focus(); return false; }
+  if (loggingIn) return false;
+  loggingIn = true;
+  try {
+    const r = await apiPost({action:'studentLogin', cls, name, pin});
+    if (!r.ok){ toast(r.error || '未能登入'); pn.value=''; pn.focus(); return false; }
+    S.me = {name:r.name, cls:r.cls, sid:r.sid, pin}; store.set('cy_me', S.me);
+    toast(r.isNew ? '已設定你的密碼，請記住它！' : `歡迎回來，${r.name}！`);
+    S.myRows = []; rebuildMy(); loadMyRecord(); return true;
+  } catch(e){ toast('需要連接網絡才可以登入'); return false; }
+  finally { loggingIn = false; }
 }
 function pickMode(k){ const a=$('#sname'),b=$('#scls'); if(a){S.draftName=a.value;S.draftCls=b.value;} const c=$('#pcat'); if(c) S.practiceCat=c.value; const n=$('#pcount'); if(n) S.practiceCount=+n.value; S.practiceMode=k; render(); }
 /* ---------- 闖關 ---------- */
@@ -538,7 +557,7 @@ function viewChallenge(){
   return `${studentTop()}
   <div class="section-head"><div><h2>成語闖關</h2><div class="sub">每關 ${lvPlan(ls[0])} 題，答對 8 成就過關，並解鎖下一關。全對可得三粒星。</div></div>
     ${S.me?`<div class="row"><span class="tag ok">已過 ${passedN} / ${ls.length} 關</span><span class="stars">★</span><b>${starN}</b><span class="sub">/ ${ls.length*3}</span></div>`:''}</div>
-  ${!S.me?`<form class="card setup" style="margin-bottom:16px" onsubmit="event.preventDefault();if(takeName())render()">${nameFields()}<div><button class="btn primary" type="submit">確定</button></div></form>`:''}
+  ${!S.me?`<form class="card setup" style="margin-bottom:16px" onsubmit="event.preventDefault();takeName().then(ok=>ok&&render())"><h2 style="font-size:20px">學生登入</h2>${nameFields()}<div><button class="btn primary" type="submit">登入</button></div></form>`:''}
   <div class="levels">${ls.map(n=>{
     const st = L[n] || {}, open = levelOpen(n), cnt = levelIdioms(n).length;
     const cls = !open ? 'locked' : st.passed ? 'passed' : '';
@@ -581,7 +600,7 @@ function buildQuestions(pool, n, mode){
 }
 async function startQuiz(ev){
   ev.preventDefault();
-  if (!takeName()) return;
+  if (!(await takeName())) return;
   const pc=$('#pcat'); S.practiceCat = pc ? pc.value : '';
   S.practiceCount = +$('#pcount').value;
   let pool = S.idioms.filter(i=>i.word && i.meaning && (!S.practiceCat || i.category===S.practiceCat));
@@ -657,7 +676,7 @@ function challengeResult(z, wrong){
 
 /* ---------- 我的紀錄 ---------- */
 function viewRecord(){
-  if (!S.me) return `<div class="card empty">請先到「練習」填上姓名和班別。<div style="margin-top:12px"><a class="btn primary" href="#practice" style="text-decoration:none">去練習</a></div></div>`;
+  if (!S.me) return `<form class="card setup" style="margin:0 auto" onsubmit="event.preventDefault();takeName().then(ok=>ok&&render())"><h2 style="font-size:22px">學生登入</h2>${nameFields()}<div><button class="btn primary" type="submit">登入</button></div></form>`;
   const m=S.my;
   if (!m.total) return `<div class="card empty">你仍未有練習紀錄。<div style="margin-top:12px"><a class="btn primary" href="#practice" style="text-decoration:none">去練習</a></div></div>`;
   const rows = Object.entries(m.byIdiom).map(([id,b])=>({id,b,i:byId(id)})).filter(r=>r.i);
@@ -689,10 +708,14 @@ async function loadTeacher(){
   S.tLoading = true; softRender();
   try {
     const r = await apiPost({action:'teacherData', pw:S.pw});
-    if (!r.ok){ if (/密碼/.test(r.error||'')){ S.pw=null; try{sessionStorage.removeItem('cy_pw')}catch(e){} toast('密碼不正確'); } else toast('載入失敗：'+r.error); }
+    if (!r.ok){ if (r.auth || /密碼/.test(r.error||'')){ S.pw=null; try{sessionStorage.removeItem('cy_pw')}catch(e){} S.tErr=r.error; } else toast('載入失敗：'+r.error); }
     else {
       S.idioms = r.idioms.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); store.set('cy_idioms', S.idioms);
-      S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now(); loadTop();
+      S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now(); S.tErr='';
+      S.registered = Object.fromEntries((r.students||[]).map(x=>[x.sid,x]));
+      // 已登記但未作答的學生也列出
+      for (const x of (r.students||[])) if (!S.all.some(s=>s.id===x.sid)) S.all.push({id:x.sid, name:x.name, cls:x.cls, total:0, correct:0, lastAt:0, sessions:0, byIdiom:{}, recent:[], levels:{}});
+      loadTop();
     }
   } catch(e){ toast('未能連接 Google 試算表'); }
   S.tLoading = false; softRender();
@@ -707,6 +730,7 @@ function viewTeacher(){
   if (!API) return '<div class="card empty">未設定後端。</div>';
   if (!S.pw) return `<form class="card setup" onsubmit="teacherLogin(event)" style="margin:0 auto">
     <h2 style="font-size:22px">老師登入</h2>
+    ${S.tErr?`<div class="banner err" style="margin:0">${esc(S.tErr)}</div>`:''}
     <label class="f"><span>老師密碼</span><input type="password" id="tpw" required autocomplete="current-password"></label>
     <div><button class="btn primary" type="submit">登入</button></div></form>`;
   if (!S.teacherLoaded) return `<div class="empty">${S.tLoading?'正在讀取試算表…':'未能載入。'}</div>`;
@@ -719,8 +743,9 @@ function viewTeacher(){
 }
 const sortStudents = arr => arr.slice().sort((a,b)=>(a.cls||'').localeCompare(b.cls||'','zh-Hant',{numeric:true}) || (a.name||'').localeCompare(b.name||'','zh-Hant'));
 function teacherStudents(){
-  const st = S.all;
-  if (S.openStudent){ const s=st.find(x=>x.id===S.openStudent); if (s) return studentDetail(s); }
+  const st = S.all.filter(s=>s.total>0);
+  if (S.openStudent){ const s=S.all.find(x=>x.id===S.openStudent); if (s) return studentDetail(s); }
+  const idle = S.all.filter(s=>!s.total);
   const week = Date.now()-7*864e5;
   const tot = st.reduce((a,s)=>a+s.total,0), cor = st.reduce((a,s)=>a+s.correct,0);
   return `<div class="tiles">
@@ -739,10 +764,11 @@ function teacherStudents(){
     <td class="num"><span class="bar"><i style="width:${p}%;background:${p>=70?'var(--jade)':p>=50?'var(--gold)':'var(--seal)'}"></i></span>${p}%</td>
     <td class="num">${passedCount(s)} / ${levelList().length}</td>
     <td class="num">${weak?`<span class="tag warn">${weak} 個</span>`:'—'}</td><td class="num">${ago(s.lastAt)}</td></tr>`; }).join('')}
-  </tbody></table></div>`:'<div class="card empty">仍未有學生練習。把網址給學生，他們做練習後按「重新整理」就會看到。</div>'}`;
+  </tbody></table></div>`:'<div class="card empty">仍未有學生練習。把網址給學生，他們做練習後按「重新整理」就會看到。</div>'}
+  ${idle.length?`<p class="sub" style="margin-top:16px">已登入但未作答：${idle.map(s=>`<a href="#teacher" onclick="event.preventDefault();S.openStudent='${esc(s.id)}';render()">${esc(s.cls)} ${esc(s.name)}</a>`).join('、')}</p>`:''}`;
 }
 const passedCount = s => levelList().filter(n=>s.levels[n]&&s.levels[n].passed).length;
-function openStu(ix){ S.openStudent = sortStudents(S.all)[ix].id; render(); window.scrollTo(0,0); }
+function openStu(ix){ S.openStudent = sortStudents(S.all.filter(s=>s.total>0))[ix].id; render(); window.scrollTo(0,0); }
 function studentDetail(s){
   const rows = Object.entries(s.byIdiom).map(([id,b])=>({id,b,w:(byId(id)||{}).word})).filter(r=>r.w).sort((a,b)=>(b.b.w-b.b.c)-(a.b.w-a.b.c));
   return `<button class="btn small" onclick="S.openStudent=null;render()">← 返回學生列表</button>
@@ -762,7 +788,16 @@ function studentDetail(s){
   </tbody></table></div>
   <h3 style="font-size:17px;margin-bottom:8px">最近作答（最多 ${MAX_RECENT} 題）</h3>
   ${recentTable(s.recent)}
-  <div style="margin-top:22px"><button class="btn danger" onclick="armDelete(this, ()=>resetStudent(S.openStudent))">清除此學生紀錄</button></div>`;
+  <div class="card" style="margin-top:22px;display:grid;gap:10px">
+    <div><b>學生密碼：</b>${S.registered&&S.registered[s.id]?'已設定':'<span class="sub">未設定（學生下次登入時會設定新密碼）</span>'}</div>
+    <div class="row">${S.registered&&S.registered[s.id]?`<button class="btn" onclick="armDelete(this, ()=>resetPin(S.openStudent))">重設密碼</button>`:''}
+      <button class="btn danger" onclick="armDelete(this, ()=>resetStudent(S.openStudent))">清除此學生的作答紀錄</button></div>
+    <div class="sub">重設密碼後，學生下次登入時輸入的 4 位數字會成為新密碼；作答紀錄會保留。</div>
+  </div>`;
+}
+async function resetPin(sid){
+  try { const r = await apiPost({action:'resetPin', pw:S.pw, sid}); if(!r.ok) throw new Error(r.error); toast('已重設密碼'); loadTeacher(); }
+  catch(e){ toast('未能重設：'+e.message); }
 }
 async function resetStudent(sid){
   try { const r = await apiPost({action:'clearStudent', pw:S.pw, sid}); if(!r.ok) throw new Error(r.error); S.openStudent=null; toast('已清除'); loadTeacher(); }
@@ -770,7 +805,7 @@ async function resetStudent(sid){
 }
 function downloadCsv(){
   const head=['班別學號','姓名','作答題數','練習日數','正確率(%)','已過關卡','要溫習成語','最後練習'];
-  const lines=[head].concat(sortStudents(S.all).map(s=>[s.cls,s.name,s.total,s.sessions,pct(s.correct,s.total),passedCount(s),
+  const lines=[head].concat(sortStudents(S.all.filter(s=>s.total>0)).map(s=>[s.cls,s.name,s.total,s.sessions,pct(s.correct,s.total),passedCount(s),
     Object.entries(s.byIdiom).filter(([,b])=>isWeak(b)).map(([id])=>(byId(id)||{}).word).filter(Boolean).join('、'), fmtTime(s.lastAt)]));
   const csv='﻿'+lines.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
@@ -930,7 +965,7 @@ function recordDialog(id){
       audioCache.set(r.audio, Promise.resolve(R.url)); R.url = null;
       i.audio = r.audio; store.set('cy_idioms', S.idioms); d.close(); toast('已儲存錄音'); render();
     } catch(e){
-      $('#rMsg').textContent = /DriveApp|權限|permission|authoriz/i.test(e.message) ? '後端未有雲端硬碟權限：請在 Apps Script 執行一次 setup 並允許存取，然後部署新版本。' : '未能儲存：'+e.message;
+      $('#rMsg').textContent = /權限|permission|authoriz|403|401|雲端硬碟錯誤/i.test(e.message) ? '後端未有雲端硬碟權限：請在 Apps Script 執行一次 setup 並允許存取，然後部署新版本。（'+e.message+'）' : '未能儲存：'+e.message;
       $('#rSave').disabled=false; $('#rSave').textContent='儲存錄音';
     }
   };
