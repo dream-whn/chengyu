@@ -4,12 +4,14 @@
  * 2. 選擇函式「setup」按「執行」一次（第一次會要求授權）
  * 3. 部署 → 新增部署作業 → 網頁應用程式（執行身分：我；存取權：所有人）
  * 已經用緊舊版？選擇函式「assignLevels」執行一次，就會加上「級別」欄並把 100 個成語分成 5 關。
+ * 要加例句？選擇函式「addExamples」執行一次，會為 100 個成語填上例句（已有例句的不會被覆蓋）。
+ * 要用錄音功能？更新程式後再執行一次「setup」，按提示允許存取 Google 雲端硬碟（錄音會存在「成語練習室錄音」資料夾）。
  */
 const TEACHER_PASSWORD = 'cisabc123';
 
 const SHEET_IDIOMS = '成語';
 const SHEET_LOG = '作答紀錄';
-const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間', '級別'];
+const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間', '級別', '錄音'];
 const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案', '關卡', '場次'];
 
 /* ---------- 初次設定 ---------- */
@@ -19,7 +21,7 @@ function setup() {
   if (s.getLastRow() === 0) {
     s.appendRow(IDIOM_HEAD);
     const now = Date.now();
-    const rows = SEED.map((r, i) => ['c' + String(i + 1).padStart(3, '0'), r[0], r[1], '', r[2], '', now + i, LEVELS[r[0]] || '']);
+    const rows = SEED.map((r, i) => ['c' + String(i + 1).padStart(3, '0'), r[0], r[1], EXAMPLES[r[0]] || '', r[2], '', now + i, LEVELS[r[0]] || '']);
     s.getRange(2, 1, rows.length, IDIOM_HEAD.length).setValues(rows);
   }
   ensureHeaders_();
@@ -29,6 +31,45 @@ function setup() {
   l.setFrozenRows(1);
   const first = ss.getSheets()[0];
   if (first.getName() !== SHEET_IDIOMS && first.getName() !== SHEET_LOG && first.getLastRow() === 0) ss.deleteSheet(first);
+  audioFolder_(); // 第一次會要求存取雲端硬碟的權限
+}
+
+/* ---------- 錄音（存在雲端硬碟） ---------- */
+function audioFolder_() {
+  const props = PropertiesService.getScriptProperties();
+  const id = props.getProperty('AUDIO_FOLDER');
+  if (id) { try { const f = DriveApp.getFolderById(id); if (!f.isTrashed()) return f; } catch (e) {} }
+  const f = DriveApp.createFolder('成語練習室錄音');
+  props.setProperty('AUDIO_FOLDER', f.getId());
+  return f;
+}
+function trashFile_(fid) { if (fid) { try { DriveApp.getFileById(fid).setTrashed(true); } catch (e) {} } }
+
+function saveAudio_(id, mime, data, ext) {
+  if (!data) return { ok: false, error: '沒有錄音內容' };
+  if (data.length > 8 * 1024 * 1024) return { ok: false, error: '錄音檔太大（上限約 6MB）' };
+  const s = sheet_(SHEET_IDIOMS);
+  const at = findRow_(s, id);
+  if (at < 0) return { ok: false, error: '找不到這個成語' };
+  const word = String(s.getRange(at, 2).getValue());
+  const safeExt = String(ext || 'wav').replace(/[^a-z0-9]/gi, '').slice(0, 5) || 'wav';
+  const blob = Utilities.newBlob(Utilities.base64Decode(data), String(mime || 'audio/wav'), word + '.' + safeExt);
+  const file = audioFolder_().createFile(blob);
+  trashFile_(String(s.getRange(at, 9).getValue()));
+  s.getRange(at, 9).setValue(file.getId());
+  return { ok: true, audio: file.getId() };
+}
+function deleteAudio_(id) {
+  const s = sheet_(SHEET_IDIOMS);
+  const at = findRow_(s, id);
+  if (at > 0) { trashFile_(String(s.getRange(at, 9).getValue())); s.getRange(at, 9).setValue(''); }
+  return { ok: true };
+}
+function getAudio_(fid) {
+  // 只提供成語庫內登記了的錄音，不會讀取雲端硬碟的其他檔案
+  if (!fid || !readIdioms_().some(x => x.audio === fid)) return { ok: false, error: '找不到錄音' };
+  const b = DriveApp.getFileById(fid).getBlob();
+  return { ok: true, mime: b.getContentType(), data: Utilities.base64Encode(b.getBytes()) };
 }
 
 /* 舊版試算表補上新欄位標題 */
@@ -57,6 +98,23 @@ function assignLevels() {
   Logger.log('已設定 ' + changed + ' 個成語的級別');
 }
 
+/* 為初始 100 個成語填上例句（只填空白的，老師自己寫過的不會被覆蓋） */
+function addExamples() {
+  setup();
+  const s = sheet_(SHEET_IDIOMS);
+  const n = s.getLastRow() - 1;
+  if (n < 1) return;
+  const words = s.getRange(2, 2, n, 1).getValues();
+  const exs = s.getRange(2, 4, n, 1).getValues();
+  let changed = 0;
+  words.forEach((w, i) => {
+    const e = EXAMPLES[String(w[0]).trim()];
+    if (e && !String(exs[i][0]).trim()) { exs[i][0] = e; changed++; }
+  });
+  s.getRange(2, 4, n, 1).setValues(exs);
+  Logger.log('已加入 ' + changed + ' 個例句');
+}
+
 /* ---------- 讀取 ---------- */
 function sheet_(name) { return SpreadsheetApp.getActive().getSheetByName(name); }
 function clean_(v, max) {
@@ -81,7 +139,8 @@ function readIdioms_() {
       fixed = true;
     }
     out.push({ id: String(r[0]), word: String(r[1]).trim(), meaning: String(r[2]), example: String(r[3]),
-      category: String(r[4]), reading: String(r[5]), createdAt: Number(r[6]) || (i + 1), level: Number(r[7]) || 0 });
+      category: String(r[4]), reading: String(r[5]), createdAt: Number(r[6]) || (i + 1), level: Number(r[7]) || 0,
+      audio: String(r[8] || '') });
   });
   return out;
 }
@@ -127,6 +186,7 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   try {
     if (p.action === 'idioms') return out_({ ok: true, idioms: readIdioms_() });
+    if (p.action === 'audio') return out_(getAudio_(p.f));
     if (p.action === 'top') return out_({ ok: true, top: top_(3) });
     if (p.action === 'myRecord') return out_({ ok: true, rows: readLog_().filter(r => r.sid === p.sid) });
     return out_({ ok: true, hello: '成語練習室後端運作中' });
@@ -148,6 +208,8 @@ function doPost(e) {
       case 'deleteIdiom': return out_(deleteIdiom_(b.id));
       case 'bulkIdioms': return out_(bulkIdioms_(b.items || []));
       case 'clearStudent': return out_(clearStudent_(b.sid));
+      case 'saveAudio': return out_(saveAudio_(b.id, b.mime, b.data, b.ext));
+      case 'deleteAudio': return out_(deleteAudio_(b.id));
     }
     return out_({ ok: false, error: '未知指令' });
   } catch (err) {
@@ -191,7 +253,7 @@ function saveIdiom_(d) {
 function deleteIdiom_(id) {
   const s = sheet_(SHEET_IDIOMS);
   const at = findRow_(s, id);
-  if (at > 0) s.deleteRow(at);
+  if (at > 0) { trashFile_(String(s.getRange(at, 9).getValue())); s.deleteRow(at); }
   return { ok: true };
 }
 
@@ -329,3 +391,107 @@ const SEED = [
 
 /* ---------- 5 關分級（1 最易，5 最難） ---------- */
 const LEVELS = {"一心一意": 1, "三心二意": 1, "四面八方": 1, "十全十美": 1, "七上八下": 1, "人山人海": 1, "春暖花開": 1, "鳥語花香": 1, "笑容滿面": 1, "大吃一驚": 1, "自言自語": 1, "亂七八糟": 1, "傾盆大雨": 1, "萬里無雲": 1, "冰天雪地": 1, "繁星點點": 1, "手舞足蹈": 1, "眉開眼笑": 1, "相親相愛": 1, "助人為樂": 1, "五花八門": 2, "獨一無二": 2, "千方百計": 2, "山清水秀": 2, "風和日麗": 2, "秋高氣爽": 2, "興高采烈": 2, "垂頭喪氣": 2, "悶悶不樂": 2, "膽小如鼠": 2, "骨瘦如柴": 2, "濃眉大眼": 2, "和藹可親": 2, "彬彬有禮": 2, "拾金不昧": 2, "知錯能改": 2, "誠實守信": 2, "光陰似箭": 2, "滿載而歸": 2, "迫不及待": 2, "萬無一失": 3, "九牛一毛": 3, "依山傍水": 3, "心花怒放": 3, "提心吊膽": 3, "喜出望外": 3, "目不轉睛": 3, "精神奕奕": 3, "井井有條": 3, "車水馬龍": 3, "鴉雀無聲": 3, "震耳欲聾": 3, "川流不息": 3, "煥然一新": 3, "全神貫注": 3, "半途而廢": 3, "名列前茅": 3, "不約而同": 3, "自告奮勇": 3, "隨手可得": 3, "守株待兔": 4, "畫蛇添足": 4, "亡羊補牢": 4, "井底之蛙": 4, "狐假虎威": 4, "對牛彈琴": 4, "盲人摸象": 4, "如魚得水": 4, "鶴立雞群": 4, "自相矛盾": 4, "掩耳盜鈴": 4, "刻舟求劍": 4, "杞人憂天": 4, "雪中送炭": 4, "錦上添花": 4, "火上加油": 4, "恍然大悟": 4, "呆若木雞": 4, "日月如梭": 4, "爭分奪秒": 4, "怒髮衝冠": 5, "美不勝收": 5, "廢寢忘食": 5, "持之以恆": 5, "循序漸進": 5, "溫故知新": 5, "勤能補拙": 5, "不恥下問": 5, "學富五車": 5, "大公無私": 5, "見義勇為": 5, "禮尚往來": 5, "飲水思源": 5, "尊師重道": 5, "異想天開": 5, "得意忘形": 5, "班門弄斧": 5, "曇花一現": 5, "無可奈何": 5, "莫名其妙": 5};
+
+/* ---------- 100 個成語的例句 ---------- */
+const EXAMPLES = {
+"一心一意": "弟弟一心一意地砌模型，連媽媽叫他吃飯也聽不到。",
+"三心二意": "做功課時要專心，不可以三心二意，一邊寫一邊看電視。",
+"五花八門": "書展裏的圖書五花八門，有漫畫、小說，也有科學書。",
+"七上八下": "等候派成績表時，我的心七上八下，十分緊張。",
+"九牛一毛": "我捐出的十元雖然只是九牛一毛，但也是一份心意。",
+"十全十美": "世上沒有十全十美的人，最重要是肯不斷進步。",
+"千方百計": "小貓爬上了大樹，哥哥千方百計想把牠救下來。",
+"萬無一失": "出發去旅行前，爸爸把行李檢查了三次，確保萬無一失。",
+"四面八方": "運動會那天，同學們從四面八方湧到操場為運動員打氣。",
+"獨一無二": "這張生日卡是妹妹親手畫的，在世上獨一無二。",
+"守株待兔": "考試前不溫習，只希望題目剛好會做，這就像守株待兔一樣。",
+"畫蛇添足": "這幅畫已經很美麗，你再加上那麼多顏色，就是畫蛇添足了。",
+"亡羊補牢": "我上次忘了帶功課，現在每晚都先執好書包，總算是亡羊補牢。",
+"井底之蛙": "多看書、多旅行，才不會做一隻只看見小小天空的井底之蛙。",
+"狐假虎威": "他仗着哥哥是風紀，在小息時狐假虎威地呼喝其他同學。",
+"鶴立雞群": "表哥身高一米九，站在人群中真是鶴立雞群。",
+"對牛彈琴": "跟三歲的小侄子解釋數學公式，簡直是對牛彈琴。",
+"盲人摸象": "只聽一個人的說法就下結論，就像盲人摸象，看不清全部真相。",
+"如魚得水": "小明加入了足球隊後如魚得水，每天都踢得很開心。",
+"膽小如鼠": "表弟膽小如鼠，連看卡通片裏的怪獸也會嚇得躲在被窩裏。",
+"春暖花開": "春暖花開的時候，公園裏開滿了五顏六色的杜鵑花。",
+"風和日麗": "今天風和日麗，我們一家人到郊外野餐。",
+"萬里無雲": "陸運會當天萬里無雲，陽光十分猛烈。",
+"傾盆大雨": "放學時突然下起傾盆大雨，沒有帶傘的同學全身都濕透了。",
+"山清水秀": "大嶼山山清水秀，吸引了很多人去行山。",
+"鳥語花香": "清晨的公園鳥語花香，爺爺最喜歡在這裏耍太極。",
+"秋高氣爽": "秋高氣爽的日子，最適合去旅行和放風箏。",
+"冰天雪地": "北極冰天雪地，北極熊卻能在那裏自在地生活。",
+"依山傍水": "這間學校依山傍水，環境非常優美。",
+"繁星點點": "在西貢露營時，我們躺在草地上欣賞繁星點點的夜空。",
+"廢寢忘食": "科學家為了研究新藥，常常廢寢忘食地工作。",
+"全神貫注": "上課時我全神貫注地聽老師講解，所以很快就明白了。",
+"持之以恆": "學習中文要持之以恆，每天閱讀一點，自然會進步。",
+"循序漸進": "學游泳要循序漸進，先學閉氣，再學打腳。",
+"溫故知新": "考試前把舊筆記再讀一次，能溫故知新，加深印象。",
+"勤能補拙": "雖然我跑得不快，但我相信勤能補拙，每天都練習跑步。",
+"不恥下問": "爸爸遇到不懂用的手機功能，就不恥下問，請教讀小學的我。",
+"學富五車": "我們的校長學富五車，好像甚麼問題都難不倒他。",
+"名列前茅": "姐姐每天認真溫習，所以考試成績名列前茅。",
+"半途而廢": "學鋼琴雖然辛苦，但我不會半途而廢。",
+"興高采烈": "聽說明天去海洋公園，同學們都興高采烈地歡呼起來。",
+"垂頭喪氣": "球隊輸了比賽，隊員們垂頭喪氣地離開球場。",
+"怒髮衝冠": "看見有人虐待小狗，爸爸氣得怒髮衝冠。",
+"眉開眼笑": "收到新年利是，妹妹高興得眉開眼笑。",
+"心花怒放": "知道自己得了作文比賽冠軍，我頓時心花怒放。",
+"提心吊膽": "晚上一個人走過漆黑的小路，我提心吊膽，生怕有甚麼跳出來。",
+"悶悶不樂": "好朋友移民了，小芬整天悶悶不樂。",
+"喜出望外": "媽媽在我生日那天送我一隻小狗，令我喜出望外。",
+"大吃一驚": "打開門看見全班同學為我慶祝生日，我大吃一驚。",
+"手舞足蹈": "聽到放假的消息，弟弟高興得手舞足蹈。",
+"和藹可親": "新來的班主任和藹可親，同學們都很喜歡她。",
+"笑容滿面": "婆婆每次見到我們探望她，總是笑容滿面。",
+"骨瘦如柴": "那隻流浪貓骨瘦如柴，看來很久沒有吃東西了。",
+"濃眉大眼": "新同學濃眉大眼，看起來很精神。",
+"精神奕奕": "睡了一晚好覺，我今天上學精神奕奕。",
+"彬彬有禮": "小明見到老師總會主動打招呼，真是彬彬有禮。",
+"目不轉睛": "魔術師表演時，小朋友都目不轉睛地看着他的手。",
+"呆若木雞": "突然被老師叫起來回答問題，他嚇得呆若木雞。",
+"恍然大悟": "聽了老師的解釋，我才恍然大悟，原來這題要先乘後加。",
+"自言自語": "弟弟一邊砌積木，一邊自言自語，好像在跟積木說話。",
+"人山人海": "年宵市場人山人海，我們差點兒走散了。",
+"井井有條": "姐姐的書桌收拾得井井有條，要找甚麼都很容易。",
+"亂七八糟": "弟弟玩完玩具沒有收拾，房間變得亂七八糟。",
+"迫不及待": "一收到新書，我便迫不及待地打開來看。",
+"車水馬龍": "旺角的街道車水馬龍，十分熱鬧。",
+"鴉雀無聲": "校長一走進禮堂，全場立即鴉雀無聲。",
+"震耳欲聾": "除夕夜的煙花聲震耳欲聾，嚇得小狗躲在床底。",
+"川流不息": "上下班時間，港鐵站裏的人潮川流不息。",
+"煥然一新": "課室重新髹油後煥然一新，同學們都很喜歡。",
+"美不勝收": "花展裏的花朵千姿百態，美不勝收。",
+"助人為樂": "哥哥助人為樂，常常幫鄰居婆婆拿東西上樓。",
+"大公無私": "班長大公無私，就算是好朋友犯規也會如實記錄。",
+"拾金不昧": "小華在操場拾到一個錢包，拾金不昧地交給了老師。",
+"見義勇為": "那位叔叔見義勇為，合力捉住了搶手袋的賊人。",
+"禮尚往來": "鄰居送我們月餅，媽媽也回送一盒水果，大家禮尚往來。",
+"誠實守信": "答應了別人的事就要做到，做人要誠實守信。",
+"知錯能改": "弟弟打破了花瓶後主動認錯，媽媽稱讚他知錯能改。",
+"飲水思源": "我們要飲水思源，記得感謝一直照顧我們的父母和老師。",
+"尊師重道": "畢業禮上，同學們向老師鞠躬，表現出尊師重道的精神。",
+"相親相愛": "我們一家人相親相愛，每個周末都一起吃飯。",
+"自相矛盾": "他說自己從不遲到，又說今天遲到了兩次，真是自相矛盾。",
+"掩耳盜鈴": "把不合格的測驗卷藏起來，以為媽媽不會知道，這是掩耳盜鈴。",
+"刻舟求劍": "天氣已經轉冷，他還堅持穿短袖，就像刻舟求劍，不懂變通。",
+"雪中送炭": "在我最傷心的時候，好朋友的安慰真是雪中送炭。",
+"錦上添花": "我們的話劇本已很出色，加上動聽的音樂更是錦上添花。",
+"火上加油": "兩位同學正在吵架，你還在旁邊取笑，只會火上加油。",
+"異想天開": "弟弟異想天開，想用雨傘當降落傘從滑梯跳下來。",
+"得意忘形": "他贏了比賽後得意忘形，在台上大叫大跳，差點跌倒。",
+"班門弄斧": "在數學老師面前講解數學題，我覺得自己有點班門弄斧。",
+"杞人憂天": "天文台說颱風不會吹襲香港，你就不用杞人憂天了。",
+"光陰似箭": "光陰似箭，一轉眼我們便要升上中學了。",
+"日月如梭": "日月如梭，小時候種下的小樹已經長得比我還高。",
+"曇花一現": "他的好成績只是曇花一現，之後又回復懶散。",
+"爭分奪秒": "考試快要完結，同學們都爭分奪秒地檢查答案。",
+"不約而同": "老師問誰想參加旅行，全班同學不約而同地舉起手來。",
+"自告奮勇": "老師需要人幫忙搬書，小強立即自告奮勇。",
+"隨手可得": "現在資訊隨手可得，但我們要學會分辨真假。",
+"滿載而歸": "我們去果園摘士多啤梨，結果滿載而歸。",
+"無可奈何": "下雨令旅行取消了，大家都感到無可奈何。",
+"莫名其妙": "他突然對我發脾氣，令我感到莫名其妙。"
+};

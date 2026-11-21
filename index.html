@@ -136,6 +136,17 @@ dialog{border:none;border-radius:14px;padding:0;max-width:560px;width:calc(100% 
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .dlg{padding:22px;display:grid;gap:12px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:999px;font-size:15px;z-index:20}
+/* 錄音 */
+.say{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card);color:var(--jade);flex:none;padding:0}
+.say:hover{border-color:var(--jade);background:var(--jade-soft)}
+.say.playing{background:var(--jade);color:#fff;border-color:var(--jade)}
+.say.loading{opacity:.55}
+.say svg{width:18px;height:18px}
+.recbox{display:grid;gap:12px;justify-items:start}
+.recdot{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--seal);margin-right:6px;animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.2}}
+.rectime{font-variant-numeric:tabular-nums;font-weight:700}
+
 /* 闖關 */
 .levels{display:grid;gap:12px}
 .level{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;padding:16px 18px}
@@ -238,6 +249,35 @@ async function apiGet(params){
 async function apiPost(body){
   const r = await fetch(API, {method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body:JSON.stringify(body)});
   return r.json();
+}
+
+/* ---------- 錄音播放 ---------- */
+const SPEAKER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5 6 9H3v6h3l5 4z" fill="currentColor"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M18.5 5.5a9 9 0 0 1 0 13"/></svg>';
+const sayBtn = i => i && i.audio ? `<button type="button" class="say" title="聽讀音" aria-label="播放「${esc(i.word)}」的錄音" onclick="event.stopPropagation();playAudio('${esc(i.audio)}',this)">${SPEAKER}</button>` : '';
+const audioCache = new Map();
+let player = null, playingBtn = null;
+async function audioUrl(fid){
+  if (audioCache.has(fid)) return audioCache.get(fid);
+  const p = apiGet({action:'audio', f:fid}).then(r=>{
+    if (!r.ok) throw new Error(r.error||'未能載入錄音');
+    const bin = atob(r.data), u8 = new Uint8Array(bin.length);
+    for (let k=0;k<bin.length;k++) u8[k]=bin.charCodeAt(k);
+    return URL.createObjectURL(new Blob([u8],{type:r.mime||'audio/wav'}));
+  });
+  audioCache.set(fid, p);
+  p.catch(()=>audioCache.delete(fid));
+  return p;
+}
+async function playAudio(fid, btn){
+  if (player){ player.pause(); if (playingBtn) playingBtn.classList.remove('playing'); }
+  if (btn) btn.classList.add('loading');
+  try {
+    const url = await audioUrl(fid);
+    player = new Audio(url); playingBtn = btn;
+    if (btn){ btn.classList.remove('loading'); btn.classList.add('playing'); }
+    player.onended = player.onpause = ()=>{ if (btn) btn.classList.remove('playing'); };
+    await player.play();
+  } catch(e){ if (btn) btn.classList.remove('loading','playing'); toast('未能播放錄音'); }
 }
 
 /* ---------- 路由 ---------- */
@@ -400,7 +440,7 @@ function cardHtml(i){
   const st = S.my && S.my.byIdiom[i.id];
   const badge = st ? (isWeak(st) ? '<span class="tag warn">要再溫習</span>' : '<span class="tag ok">已掌握</span>') : '';
   return `<article class="card">
-    <div class="row" style="justify-content:space-between">${tz(i.word)}${badge}</div>
+    <div class="row" style="justify-content:space-between"><div class="row" style="gap:8px">${tz(i.word)}${sayBtn(i)}</div>${badge}</div>
     ${i.reading?`<div class="reading">${esc(i.reading)}</div>`:''}
     <p class="meaning">${esc(i.meaning)}</p>
     ${i.example?`<p class="example">${esc(i.example)}</p>`:''}
@@ -535,7 +575,7 @@ function quizQuestion(){
   }).join('');
   const fb = a ? `<div class="feedback card" style="border-color:${a===q.answer?'var(--jade)':'var(--seal)'}">
       <b style="color:${a===q.answer?'var(--jade)':'var(--seal)'}">${a===q.answer?'答對了！':'答錯了，正確答案是「'+esc(q.idiom.word)+'」'}</b>
-      <div class="row" style="margin-top:8px">${tz(q.idiom.word)}${q.idiom.reading?`<span class="reading" style="margin:0">${esc(q.idiom.reading)}</span>`:''}</div>
+      <div class="row" style="margin-top:8px">${tz(q.idiom.word)}${sayBtn(q.idiom)}${q.idiom.reading?`<span class="reading" style="margin:0">${esc(q.idiom.reading)}</span>`:''}</div>
       <p class="meaning">${esc(q.idiom.meaning)}</p>${q.idiom.example?`<p class="example">${esc(q.idiom.example)}</p>`:''}
       <div style="margin-top:12px"><button class="btn primary" id="nextBtn" onclick="nextQ()">${z.i+1<z.qs.length?'下一題':'看成績'}</button></div></div>` : '';
   return `<div class="quiz">
@@ -560,7 +600,7 @@ function quizResult(){
   return `<div class="quiz card" style="display:grid;gap:14px">
     <div class="row" style="gap:18px"><div class="score">${z.score}<span style="font-size:24px;color:var(--muted)"> / ${z.qs.length}</span></div>
       <div><h2 style="font-size:22px">${z.score===z.qs.length?'全部答對，好厲害！':pct(z.score,z.qs.length)>=70?'做得不錯！':'繼續努力！'}</h2><div class="sub">正確率 ${pct(z.score,z.qs.length)}%</div></div></div>
-    ${wrong.length?`<div><h3 style="font-size:17px;margin-bottom:8px">要再溫習的成語</h3><div class="grid">${wrong.map(l=>`<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--line);padding-top:10px">${tz(l.q.idiom.word)}<div style="flex:1;min-width:180px"><div>${esc(l.q.idiom.meaning)}</div><div class="sub">你選了：${esc(l.chosen)}</div></div></div>`).join('')}</div></div>`:''}
+    ${wrong.length?`<div><h3 style="font-size:17px;margin-bottom:8px">要再溫習的成語</h3><div class="grid">${wrong.map(l=>`<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--line);padding-top:10px">${tz(l.q.idiom.word)}${sayBtn(l.q.idiom)}<div style="flex:1;min-width:180px"><div>${esc(l.q.idiom.meaning)}</div><div class="sub">你選了：${esc(l.chosen)}</div></div></div>`).join('')}</div></div>`:''}
     <div class="row"><button class="btn primary" onclick="S.quiz=null;render()">再練一次</button>${wrong.length?`<button class="btn" onclick="S.practiceMode='wrong';S.quiz=null;render()">只練錯題</button>`:''}</div>
   </div>`;
 }
@@ -733,9 +773,10 @@ function teacherHard(){
   </tbody></table></div>`;
 }
 function teacherIdioms(){
-  return `<div class="row" style="margin-bottom:14px"><button class="btn primary" onclick="editIdiom()">＋ 新增成語</button><button class="btn" onclick="bulkImport()">批量匯入</button><span class="sub">共 ${S.idioms.length} 個 · 亦可直接在 Google 試算表「成語」工作表修改</span></div>
-  ${S.idioms.length?`<div class="tablebox"><table><thead><tr><th>成語</th><th>解釋</th><th>例句</th><th>分類／關卡</th><th></th></tr></thead><tbody>
-  ${S.idioms.slice().reverse().map(i=>`<tr><td class="ws" style="white-space:nowrap">${esc(i.word)}${i.reading?`<div class="reading" style="margin:0;font-family:var(--body);font-weight:400">${esc(i.reading)}</div>`:''}</td><td>${esc(i.meaning)}</td><td class="sub">${esc(i.example||'')}${i.example && !i.example.includes(i.word)?'<div><span class="tag warn">例句未包含此成語，不會出例句題</span></div>':''}</td><td>${i.category?`<span class="tag">${esc(i.category)}</span>`:''}${i.level?`<div style="margin-top:4px"><span class="tag" style="background:var(--gold-soft);color:var(--gold)">${lvTitle(+i.level)}</span></div>`:''}</td>
+  return `<div class="row" style="margin-bottom:14px"><button class="btn primary" onclick="editIdiom()">＋ 新增成語</button><button class="btn" onclick="bulkImport()">批量匯入</button><span class="sub">共 ${S.idioms.length} 個 · 已錄音 ${S.idioms.filter(i=>i.audio).length} 個 · 亦可直接在 Google 試算表「成語」工作表修改</span></div>
+  ${S.idioms.length?`<div class="tablebox"><table><thead><tr><th>成語</th><th>錄音</th><th>解釋</th><th>例句</th><th>分類／關卡</th><th></th></tr></thead><tbody>
+  ${S.idioms.slice().reverse().map(i=>`<tr><td class="ws" style="white-space:nowrap">${esc(i.word)}${i.reading?`<div class="reading" style="margin:0;font-family:var(--body);font-weight:400">${esc(i.reading)}</div>`:''}</td>
+  <td style="white-space:nowrap"><div class="row" style="gap:6px;flex-wrap:nowrap">${sayBtn(i)}<button class="btn small" onclick="recordDialog('${esc(i.id)}')">${i.audio?'重錄':'錄音'}</button></div></td><td>${esc(i.meaning)}</td><td class="sub">${esc(i.example||'')}${i.example && !i.example.includes(i.word)?'<div><span class="tag warn">例句未包含此成語，不會出例句題</span></div>':''}</td><td>${i.category?`<span class="tag">${esc(i.category)}</span>`:''}${i.level?`<div style="margin-top:4px"><span class="tag" style="background:var(--gold-soft);color:var(--gold)">${lvTitle(+i.level)}</span></div>`:''}</td>
   <td style="white-space:nowrap"><button class="btn small" onclick="editIdiom('${esc(i.id)}')">修改</button> <button class="btn small danger" onclick="armDelete(this, ()=>delIdiom('${esc(i.id)}'))">刪除</button></td></tr>`).join('')}
   </tbody></table></div>`:'<div class="card empty">未有成語，按「新增成語」或「批量匯入」開始。</div>'}`;
 }
@@ -772,12 +813,103 @@ function editIdiom(id){
     try {
       const r = await apiPost({action:'saveIdiom', pw:S.pw, idiom:data});
       if (!r.ok) throw new Error(r.error);
-      data.id = r.id;
+      data.id = r.id; data.audio = i.audio || '';
       const k = S.idioms.findIndex(x=>x.id===data.id);
       if (k>=0) S.idioms[k]=data; else S.idioms.push(data);
       store.set('cy_idioms', S.idioms); d.close(); toast('已儲存'); render();
     } catch(e){ toast(e.message||'未能儲存'); $('#fsave').disabled=false; $('#fsave').textContent='儲存'; }
   };
+}
+/* ---------- 老師錄音 ---------- */
+const MAX_REC = 15;
+function blobToBase64(blob){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(String(fr.result).split(',')[1]); fr.onerror=rej; fr.readAsDataURL(blob); }); }
+async function toWav(blob){
+  const AC = window.AudioContext || window.webkitAudioContext;
+  const ac = new AC(); const buf = await ac.decodeAudioData(await blob.arrayBuffer()); ac.close && ac.close();
+  const rate = 22050, len = Math.max(1, Math.ceil(buf.duration*rate));
+  const off = new OfflineAudioContext(1, len, rate); const src = off.createBufferSource();
+  src.buffer = buf; src.connect(off.destination); src.start();
+  const data = (await off.startRendering()).getChannelData(0);
+  let peak = 0; for (let k=0;k<data.length;k++) peak = Math.max(peak, Math.abs(data[k]));
+  const gain = peak > 0.01 ? Math.min(0.95/peak, 4) : 1;   // 自動調整音量
+  const dv = new DataView(new ArrayBuffer(44 + data.length*2));
+  const w = (o,str)=>{ for (let k=0;k<str.length;k++) dv.setUint8(o+k, str.charCodeAt(k)); };
+  w(0,'RIFF'); dv.setUint32(4, 36+data.length*2, true); w(8,'WAVE'); w(12,'fmt ');
+  dv.setUint32(16,16,true); dv.setUint16(20,1,true); dv.setUint16(22,1,true); dv.setUint32(24,rate,true);
+  dv.setUint32(28,rate*2,true); dv.setUint16(32,2,true); dv.setUint16(34,16,true); w(36,'data'); dv.setUint32(40,data.length*2,true);
+  for (let k=0;k<data.length;k++){ const v=Math.max(-1,Math.min(1,data[k]*gain)); dv.setInt16(44+k*2, v<0?v*0x8000:v*0x7fff, true); }
+  return new Blob([dv], {type:'audio/wav'});
+}
+function recordDialog(id){
+  const i = byId(id); if (!i) return;
+  const d = $('#dlg');
+  const R = {stream:null, rec:null, chunks:[], blob:null, ext:'wav', mime:'audio/wav', url:null, t0:0, timer:null};
+  d.innerHTML = `<div class="dlg">
+    <h2 style="font-size:22px">錄音：${esc(i.word)}</h2>
+    <div class="row" style="gap:10px">${tz(i.word)}${i.reading?`<span class="reading" style="margin:0">${esc(i.reading)}</span>`:''}</div>
+    <div class="recbox">
+      <div class="row"><button class="btn primary" id="rStart">● 開始錄音</button><button class="btn" id="rStop" hidden>■ 停止</button>
+        <span id="rStatus" class="sub">按「開始錄音」後讀出成語，最長 ${MAX_REC} 秒。</span></div>
+      <div class="row" id="rReview" hidden><button class="btn" id="rPlay">▶ 試聽</button><span class="sub" id="rInfo"></span></div>
+      <label class="f"><span>或者上載錄音檔（mp3、m4a、wav）</span><input type="file" id="rFile" accept="audio/*"></label>
+    </div>
+    <div class="sub" id="rMsg"></div>
+    <div class="row" style="justify-content:space-between">
+      <div>${i.audio?'<button class="btn danger" id="rDel">刪除錄音</button>':''}</div>
+      <div class="row"><button class="btn" id="rCancel">取消</button><button class="btn primary" id="rSave" disabled>儲存錄音</button></div>
+    </div></div>`;
+  d.showModal();
+  const stopStream = ()=>{ if (R.stream){ R.stream.getTracks().forEach(t=>t.stop()); R.stream=null; } clearInterval(R.timer); };
+  const ready = (blob, info)=>{ R.blob=blob; if (R.url) URL.revokeObjectURL(R.url); R.url=URL.createObjectURL(blob);
+    $('#rReview').hidden=false; $('#rInfo').textContent=info; $('#rSave').disabled=false; };
+  d.onclose = ()=>{ stopStream(); if (R.rec && R.rec.state!=='inactive') try{R.rec.stop()}catch(e){} };
+  $('#rCancel').onclick = ()=>d.close();
+  $('#rStart').onclick = async ()=>{
+    if (!navigator.mediaDevices || !window.MediaRecorder){ $('#rMsg').textContent='這個瀏覽器不支援錄音，請改用 Chrome 或 Safari，或上載錄音檔。'; return; }
+    try { R.stream = await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true, noiseSuppression:true}}); }
+    catch(e){ $('#rMsg').textContent='未能使用咪高峰。請在瀏覽器網址列旁允許「麥克風」權限，然後再試。'; return; }
+    const type = ['audio/webm;codecs=opus','audio/mp4','audio/webm'].find(t=>MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+    R.chunks = []; R.rec = new MediaRecorder(R.stream, type?{mimeType:type}:undefined);
+    R.rec.ondataavailable = e=>{ if (e.data.size) R.chunks.push(e.data); };
+    R.rec.onstop = async ()=>{
+      stopStream(); $('#rStart').hidden=false; $('#rStop').hidden=true; $('#rStatus').textContent='處理中…';
+      try { const raw = new Blob(R.chunks, {type:R.rec.mimeType||type||'audio/webm'}); const wav = await toWav(raw);
+        R.ext='wav'; R.mime='audio/wav'; ready(wav, `錄音長 ${((Date.now()-R.t0)/1000).toFixed(1)} 秒`); $('#rStatus').textContent='錄好了，可以試聽或重錄。';
+        $('#rStart').textContent='● 重錄'; }
+      catch(e){ $('#rStatus').textContent='處理錄音時出錯，請再試一次。'; }
+    };
+    R.rec.start(); R.t0 = Date.now();
+    $('#rStart').hidden=true; $('#rStop').hidden=false; $('#rReview').hidden=true; $('#rSave').disabled=true;
+    const tick = ()=>{ const sec=(Date.now()-R.t0)/1000; $('#rStatus').innerHTML=`<span class="recdot"></span>錄音中 <span class="rectime">${sec.toFixed(1)}</span> 秒`; if (sec>=MAX_REC) $('#rStop').click(); };
+    tick(); R.timer = setInterval(tick, 200);
+  };
+  $('#rStop').onclick = ()=>{ if (R.rec && R.rec.state==='recording') R.rec.stop(); };
+  $('#rPlay').onclick = ()=>{ if (R.url){ const a=new Audio(R.url); a.play().catch(()=>{}); } };
+  $('#rFile').onchange = ()=>{
+    const f = $('#rFile').files[0]; if (!f) return;
+    if (f.size > 5*1024*1024){ $('#rMsg').textContent='檔案太大，請用 5MB 以下的錄音檔。'; return; }
+    R.mime = f.type || 'audio/mpeg'; R.ext = (f.name.split('.').pop()||'mp3').toLowerCase();
+    ready(f, `已選擇 ${f.name}`);
+  };
+  $('#rSave').onclick = async ()=>{
+    if (!R.blob) return;
+    $('#rSave').disabled=true; $('#rSave').textContent='上載中…'; $('#rMsg').textContent='';
+    try {
+      const r = await apiPost({action:'saveAudio', pw:S.pw, id:i.id, mime:R.mime, ext:R.ext, data:await blobToBase64(R.blob)});
+      if (!r.ok) throw new Error(r.error);
+      audioCache.set(r.audio, Promise.resolve(R.url)); R.url = null;
+      i.audio = r.audio; store.set('cy_idioms', S.idioms); d.close(); toast('已儲存錄音'); render();
+    } catch(e){
+      $('#rMsg').textContent = /DriveApp|權限|permission|authoriz/i.test(e.message) ? '後端未有雲端硬碟權限：請在 Apps Script 執行一次 setup 並允許存取，然後部署新版本。' : '未能儲存：'+e.message;
+      $('#rSave').disabled=false; $('#rSave').textContent='儲存錄音';
+    }
+  };
+  const del = $('#rDel');
+  if (del) del.onclick = ()=>armDelete(del, async ()=>{
+    try { const r = await apiPost({action:'deleteAudio', pw:S.pw, id:i.id}); if (!r.ok) throw new Error(r.error);
+      i.audio=''; store.set('cy_idioms', S.idioms); d.close(); toast('已刪除錄音'); render(); }
+    catch(e){ $('#rMsg').textContent='未能刪除：'+e.message; }
+  });
 }
 function bulkImport(){
   const d=$('#dlg');
