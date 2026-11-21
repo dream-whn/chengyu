@@ -136,15 +136,42 @@ dialog{border:none;border-radius:14px;padding:0;max-width:560px;width:calc(100% 
 dialog::backdrop{background:rgba(0,0,0,.45)}
 .dlg{padding:22px;display:grid;gap:12px}
 .toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--paper);padding:10px 18px;border-radius:999px;font-size:15px;z-index:20}
-/* 首三名 */
+/* 闖關 */
+.levels{display:grid;gap:12px}
+.level{display:grid;grid-template-columns:auto 1fr auto;gap:16px;align-items:center;padding:16px 18px}
+.level .no{width:56px;height:56px;border-radius:12px;display:grid;place-items:center;background:var(--jade);color:#fff;font-family:var(--display);font-weight:900;font-size:26px;line-height:1}
+.level.locked{opacity:.6}
+.level.locked .no{background:var(--line);color:var(--muted)}
+.level.passed{border-color:var(--jade)}
+.level h3{font-size:19px}
+.level .info{font-size:14px;color:var(--muted)}
+.level .acts{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+.stars{font-size:20px;letter-spacing:2px;color:#e0ad1c;white-space:nowrap}
+.stars .off{color:var(--line)}
+.lockline{font-size:13px;color:var(--muted)}
+.big-stars{font-size:44px;letter-spacing:6px;color:#e0ad1c;line-height:1}
+.big-stars .off{color:var(--line)}
+@media (max-width:600px){.level{grid-template-columns:auto 1fr}.level .acts{grid-column:1/-1;justify-content:flex-start}}
+
+/* 首三名：金銀銅牌 */
 .podium{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:24px}
-.podium .card{display:flex;gap:12px;align-items:center;padding:14px}
-.podium .rank{flex:none;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;font-family:var(--display);font-weight:900;font-size:20px;color:#fff}
-.podium .r1 .rank{background:var(--gold)}.podium .r2 .rank{background:var(--jade)}.podium .r3 .rank{background:var(--seal)}
-.podium .r1{border-color:var(--gold);background:linear-gradient(var(--gold-soft),var(--card))}
+.podium .card{display:flex;gap:14px;align-items:center;padding:14px 16px;border-width:1.5px}
+.medal{position:relative;flex:none;width:46px;height:56px}
+.medal .ribbon{position:absolute;top:0;left:50%;width:24px;height:20px;transform:translateX(-50%);
+  background:linear-gradient(90deg,#c0392b 0 50%,#1f5fa8 50% 100%);clip-path:polygon(0 0,100% 0,100% 100%,50% 72%,0 100%)}
+.medal .disc{position:absolute;bottom:0;left:1px;width:44px;height:44px;border-radius:50%;display:grid;place-items:center;
+  font-family:var(--display);font-weight:900;font-size:19px;color:#fff;text-shadow:0 1px 2px rgba(0,0,0,.35);
+  box-shadow:inset 0 0 0 3px rgba(255,255,255,.5),0 2px 4px rgba(0,0,0,.18)}
+.m1 .disc{background:radial-gradient(circle at 35% 30%,#ffe98a,#e0ad1c 55%,#a97c06)}
+.m2 .disc{background:radial-gradient(circle at 35% 30%,#ffffff,#bcc3cc 55%,#7f8893)}
+.m3 .disc{background:radial-gradient(circle at 35% 30%,#f6c296,#c97b3a 55%,#8a4f1d)}
+.podium .r1{border-color:#e0ad1c}.podium .r2{border-color:#aab2bc}.podium .r3{border-color:#c97b3a}
 .podium .nm{font-weight:700;font-size:17px;line-height:1.3}
+.podium .lbl{font-size:12px;font-weight:700;margin-right:6px;padding:1px 7px;border-radius:999px;vertical-align:2px;color:#fff}
+.r1 .lbl{background:#b98a0b}.r2 .lbl{background:#7f8893}.r3 .lbl{background:#a8622a}
 .podium .meta{font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
-.podium-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px}
+.podium .slot{border-style:dashed;color:var(--muted)}
+.podium-head{display:flex;align-items:baseline;gap:10px;margin-bottom:10px;flex-wrap:wrap}
 .podium-head h3{font-size:18px}
 @media (max-width:700px){.podium{grid-template-columns:1fr}}
 @media (max-width:520px){.opts{grid-template-columns:1fr}.tz.big{--s:58px}}
@@ -183,6 +210,16 @@ const tz = (word, cls='', blankAt=-1) => `<span class="tz ${cls}">${[...word].ma
 const byId = id => S.idioms.find(x=>x.id===id);
 const cats = () => [...new Set(S.idioms.map(i=>i.category).filter(Boolean))];
 const MODE_NAMES = {meaning:'看解釋 選成語', fill:'補上缺字', sentence:'例句填空'};
+const LEVEL_NAMES = {1:'起步',2:'熟練',3:'進階',4:'寓言故事',5:'成語高手'};
+const CN_NUM = ['零','一','二','三','四','五','六','七','八','九','十'];
+const lvTitle = n => `第${CN_NUM[n]||n}關`;
+const lvName = n => LEVEL_NAMES[n] || '';
+const levelList = () => [...new Set(S.idioms.map(i=>+i.level||0).filter(Boolean))].sort((a,b)=>a-b);
+const levelIdioms = n => S.idioms.filter(i=>+i.level===n && i.word && i.meaning);
+const lvPlan = n => Math.min(10, levelIdioms(n).length);
+const lvNeed = n => Math.ceil(lvPlan(n)*0.8);
+const starsFor = (c,n) => !n ? 0 : c>=n ? 3 : c/n>=0.9 ? 2 : c/n>=0.8 ? 1 : 0;
+const starsHtml = (k, cls='stars') => `<span class="${cls}" aria-label="${k} 粒星">${'★'.repeat(k)}<span class="off">${'★'.repeat(3-k)}</span></span>`;
 const MODE_BY_NAME = Object.fromEntries(Object.entries(MODE_NAMES).map(([k,v])=>[v,k]));
 const keyOf = (cls,name) => (cls+'|'+name).replace(/\s+/g,'').toUpperCase();
 const store = {
@@ -204,7 +241,7 @@ async function apiPost(body){
 }
 
 /* ---------- 路由 ---------- */
-const VIEWS = ['learn','practice','record','teacher'];
+const VIEWS = ['learn','challenge','practice','record','teacher'];
 function route(){ const h=location.hash.replace('#',''); S.view = VIEWS.includes(h) ? h : 'learn'; if (S.view==='teacher' && S.pw && !S.teacherLoaded) loadTeacher(); render(); }
 window.addEventListener('hashchange', route);
 
@@ -229,20 +266,25 @@ async function loadIdioms(){
     const r = await apiGet({action:'idioms'});
     if (!r.ok) throw new Error(r.error);
     S.idioms = r.idioms.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0));
-    store.set('cy_idioms', S.idioms); S.loadErr='';
+    store.set('cy_idioms', S.idioms); S.loadErr=''; rebuildMy();
   } catch(e){ S.loadErr = S.idioms.length ? 'stale' : 'fail'; }
   S.idiomsLoaded = true; softRender();
 }
 async function loadTop(){
   if (!API) return;
-  try { const r = await apiGet({action:'top'}); if (r.ok){ S.top = r.top; store.set('cy_top', r.top); softRender(); } } catch(e){}
+  try { const r = await apiGet({action:'top'}); if (r.ok){ S.topMissing = !Array.isArray(r.top); S.top = r.top || []; store.set('cy_top', S.top); softRender(); } } catch(e){}
 }
-const RANK_NAMES = ['第一名','第二名','第三名'];
+const MEDALS = [['金','金牌'],['銀','銀牌'],['銅','銅牌']];
 function podiumHtml(list, title){
-  if (!list || !list.length) return '';
-  return `<section aria-label="${title}"><div class="podium-head"><h3>${title}</h3><span class="sub">按已掌握成語數排名，同分比正確率</span></div>
-  <div class="podium">${list.slice(0,3).map((s,i)=>`<div class="card r${i+1}"><div class="rank" aria-label="${RANK_NAMES[i]}">${i+1}</div>
-    <div><div class="nm">${esc(s.name)}</div><div class="meta">${esc(s.cls)} · 掌握 ${s.mastered} 個 · 正確率 ${s.acc}%</div></div></div>`).join('')}</div></section>`;
+  if (!API) return '';
+  list = (list || []).slice(0,3);
+  const cards = [0,1,2].map(i=>{
+    const s = list[i], [ch, label] = MEDALS[i];
+    const medal = `<div class="medal m${i+1}" role="img" aria-label="${label}"><span class="ribbon"></span><span class="disc">${ch}</span></div>`;
+    if (!s) return `<div class="card slot r${i+1}">${medal}<div><div class="nm">虛位以待</div><div class="meta">多做練習，下一個就是你！</div></div></div>`;
+    return `<div class="card r${i+1}">${medal}<div><div class="nm"><span class="lbl">${label}</span>${esc(s.name)}</div><div class="meta">${esc(s.cls)} · 掌握 ${s.mastered} 個 · 正確率 ${s.acc}%</div></div></div>`;
+  }).join('');
+  return `<section aria-label="${title}"><div class="podium-head"><h3>${title}</h3><span class="sub">按已掌握成語數排名，同分比正確率</span></div><div class="podium">${cards}</div></section>`;
 }
 function topFromAll(){
   const ids = new Set(S.idioms.map(i=>i.id));
@@ -256,7 +298,7 @@ async function loadMyRecord(){
 }
 
 /* 練習進行中時，資料更新不打斷題目 */
-function softRender(){ if (S.view==='practice' && S.quiz && !S.quiz.done) { renderHeader(); return; } render(); }
+function softRender(){ if ((S.view==='practice'||S.view==='challenge') && S.quiz && !S.quiz.done) { renderHeader(); return; } render(); }
 
 /* ---------- 統計 ---------- */
 function aggregate(rows){
@@ -268,14 +310,23 @@ function aggregate(rows){
     s.lastAt = Math.max(s.lastAt, r.t); s.days.add(new Date(r.t).toDateString());
     const b = s.byIdiom[r.i] ||= {c:0,w:0}; r.ok ? b.c++ : b.w++; b.last = r.ok ? 1 : 0;
     s.recent.unshift(r);
+    if (r.lv && r.ss){ const x = (s.ss ||= {})[r.ss] ||= {lv:r.lv, n:0, c:0}; x.n++; if (r.ok) x.c++; }
   });
-  return Object.values(m).map(s=>({...s, sessions:s.days.size, recent:s.recent.slice(0,MAX_RECENT)}));
+  return Object.values(m).map(s=>{
+    const levels = {};
+    for (const x of Object.values(s.ss||{})){
+      const L = levels[x.lv] ||= {tries:0, best:0, stars:0, passed:false};
+      L.tries++; L.best = Math.max(L.best, x.c);
+      if (x.n >= lvPlan(x.lv) && x.c >= lvNeed(x.lv)){ L.passed = true; L.stars = Math.max(L.stars, starsFor(x.c, lvPlan(x.lv))); }
+    }
+    return {...s, sessions:s.days.size, recent:s.recent.slice(0,MAX_RECENT), levels};
+  });
 }
 const isWeak = b => b.w > b.c || b.last === 0;
 function rebuildMy(){
   if (!S.me){ S.my = null; return; }
   const rows = S.myRows.concat(pending.filter(p=>p.sid===S.me.sid));
-  S.my = aggregate(rows)[0] || {id:S.me.sid, name:S.me.name, cls:S.me.cls, total:0, correct:0, sessions:0, byIdiom:{}, recent:[]};
+  S.my = aggregate(rows)[0] || {id:S.me.sid, name:S.me.name, cls:S.me.cls, total:0, correct:0, sessions:0, byIdiom:{}, recent:[], levels:{}};
 }
 
 /* ---------- 作答紀錄：先存本機，再分批送出 ---------- */
@@ -297,14 +348,15 @@ async function flush(){
   if (pending.length) flush();
 }
 function recordAnswer(q, ok, chosen){
-  pending.push({t:Date.now(), sid:S.me.sid, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen});
+  const z = S.quiz || {};
+  pending.push({t:Date.now(), sid:S.me.sid, cls:S.me.cls, name:S.me.name, i:q.idiom.id, w:q.idiom.word, m:MODE_NAMES[q.type], ok:ok?1:0, a:chosen, lv:z.level||'', ss:z.ss||''});
   store.set('cy_pending', pending);
   rebuildMy(); flush();
 }
 
 /* ---------- 頁首 ---------- */
 function renderHeader(){
-  const tabs = [['learn','成語卡'],['practice','練習'],['record','我的紀錄'],['teacher','老師後台']];
+  const tabs = [['learn','成語卡'],['challenge','闖關'],['practice','自由練習'],['record','我的紀錄'],['teacher','老師後台']];
   $('#tabs').innerHTML = tabs.map(([k,l])=>`<a href="#${k}" class="${k==='teacher'?'teacher':''}" ${S.view===k?'aria-current="page"':''}>${l}</a>`).join('');
   $('#who').innerHTML = S.me ? `${esc(S.me.cls)} ${esc(S.me.name)} <button class="btn small" onclick="changeMe()" style="margin-left:6px">不是我</button>` : '';
 }
@@ -322,7 +374,7 @@ function render(){
   else if (S.loadErr==='stale') banner = `<div class="banner">暫時連不上伺服器，顯示的是上次載入的成語。</div>`;
   if (S.offline && pending.length) banner += `<div class="banner">有 ${pending.length} 題紀錄未上載，連上網絡後會自動補上。</div>`;
   if (!S.idiomsLoaded) { app.innerHTML = banner + `<div class="empty">載入中…</div>`; return; }
-  const v = { learn:viewLearn, practice:viewPractice, record:viewRecord, teacher:viewTeacher }[S.view];
+  const v = { learn:viewLearn, challenge:viewChallenge, practice:viewPractice, record:viewRecord, teacher:viewTeacher }[S.view];
   app.innerHTML = banner + v();
   if (S.view==='learn') bindLearn();
 }
@@ -330,16 +382,18 @@ function render(){
 /* ---------- 成語卡 ---------- */
 function viewLearn(){
   if (!S.idioms.length) return `<div class="card empty">成語庫仍是空的。老師可以在「老師後台」加入成語。</div>`;
-  const f = S.filter.trim(), c = S.cat;
-  const list = S.idioms.filter(i => (!c || i.category===c) && (!f || [i.word,i.meaning,i.example,i.reading].join(' ').includes(f)));
+  const f = S.filter.trim(), c = S.cat, lv = S.lvFilter||0;
+  const list = S.idioms.filter(i => (!c || i.category===c) && (!lv || +i.level===lv) && (!f || [i.word,i.meaning,i.example,i.reading].join(' ').includes(f)));
+  const ls = levelList();
   const cs = cats();
   return `
   <div class="section-head"><div><h2>成語卡</h2><div class="sub">共 ${S.idioms.length} 個成語。先溫習，再去練習。</div></div>
     <div class="row" style="min-width:280px">
       <input type="search" id="q" placeholder="搜尋成語或解釋" value="${esc(S.filter)}" aria-label="搜尋成語" style="flex:1;min-width:160px">
+      ${ls.length?`<select id="lvSel" aria-label="關卡" style="width:auto"><option value="0">全部關卡</option>${ls.map(n=>`<option value="${n}" ${n===lv?'selected':''}>${lvTitle(n)} ${esc(lvName(n))}</option>`).join('')}</select>`:''}
       ${cs.length?`<select id="catSel" aria-label="分類" style="width:auto"><option value="">全部分類</option>${cs.map(x=>`<option ${x===c?'selected':''}>${esc(x)}</option>`).join('')}</select>`:''}
     </div></div>
-  ${f||c?'':podiumHtml(S.top,'成語之星')}
+  ${f||c||lv?'':podiumHtml(S.top,'成語之星')}
   <div class="grid cards">${list.map(cardHtml).join('') || '<div class="empty">找不到相關成語。</div>'}</div>`;
 }
 function cardHtml(i){
@@ -350,12 +404,13 @@ function cardHtml(i){
     ${i.reading?`<div class="reading">${esc(i.reading)}</div>`:''}
     <p class="meaning">${esc(i.meaning)}</p>
     ${i.example?`<p class="example">${esc(i.example)}</p>`:''}
-    ${i.category?`<div style="margin-top:10px"><span class="tag">${esc(i.category)}</span></div>`:''}
+    ${i.category||i.level?`<div class="row" style="margin-top:10px;gap:6px">${i.level?`<span class="tag" style="background:var(--gold-soft);color:var(--gold)">${lvTitle(+i.level)}</span>`:''}${i.category?`<span class="tag">${esc(i.category)}</span>`:''}</div>`:''}
   </article>`;
 }
 function bindLearn(){
   const q=$('#q'); if(q){ q.oninput=()=>{ S.filter=q.value; const pos=q.selectionStart; render(); const n=$('#q'); n.focus(); n.setSelectionRange(pos,pos); }; }
   const c=$('#catSel'); if(c) c.onchange=()=>{ S.cat=c.value; render(); };
+  const l=$('#lvSel'); if(l) l.onchange=()=>{ S.lvFilter=+l.value; render(); };
 }
 
 /* ---------- 練習 ---------- */
@@ -369,10 +424,7 @@ function viewPractice(){
   return `
   <div class="section-head"><div><h2>開始練習</h2><div class="sub">每答一題都會自動記錄，老師可以看到你的進度。</div></div></div>
   <form class="card setup" id="setup" onsubmit="startQuiz(event)">
-    ${!S.me?`<div class="row" style="gap:12px">
-      <label class="f" style="flex:1;min-width:140px"><span>姓名</span><input type="text" id="sname" required maxlength="30" placeholder="例如：陳小明" value="${esc(S.draftName||'')}"></label>
-      <label class="f" style="width:150px"><span>班別及學號</span><input type="text" id="scls" required maxlength="20" placeholder="例如：4B 12" value="${esc(S.draftCls||'')}"></label>
-    </div><div class="sub" style="margin-top:-6px">每次都要用同一個寫法，老師才可以把你的紀錄放在一起。</div>`:''}
+    ${nameFields()}
     <div><div class="f" style="margin-bottom:6px"><span>題型</span></div>
       <div class="modes">${modes.map(([k,t,d])=>`<button type="button" class="mode" aria-pressed="${S.practiceMode===k}" onclick="pickMode('${k}')" ${k==='wrong'&&!wrongCount?'disabled':''}><b>${t}</b><small>${d}</small></button>`).join('')}</div>
     </div>
@@ -384,7 +436,61 @@ function viewPractice(){
   </form>
   <div style="margin-top:24px">${podiumHtml(S.top,'成語之星')}</div>`;
 }
+function nameFields(){
+  if (S.me) return '';
+  return `<div class="row" style="gap:12px">
+      <label class="f" style="flex:1;min-width:140px"><span>姓名</span><input type="text" id="sname" required maxlength="30" placeholder="例如：陳小明" value="${esc(S.draftName||'')}"></label>
+      <label class="f" style="width:150px"><span>班別及學號</span><input type="text" id="scls" required maxlength="20" placeholder="例如：4B 12" value="${esc(S.draftCls||'')}"></label>
+    </div><div class="sub" style="margin-top:-6px">每次都要用同一個寫法，老師才可以把你的紀錄放在一起。</div>`;
+}
+function takeName(){
+  const nm=$('#sname'), cl=$('#scls');
+  if (!nm) return !!S.me;
+  const name=nm.value.trim(), cls=cl.value.trim().toUpperCase();
+  if (!name || !cls){ toast('請先填姓名和班別學號'); return false; }
+  S.me = {name, cls, sid:keyOf(cls,name)}; store.set('cy_me', S.me);
+  rebuildMy(); loadMyRecord(); return true;
+}
 function pickMode(k){ const a=$('#sname'),b=$('#scls'); if(a){S.draftName=a.value;S.draftCls=b.value;} const c=$('#pcat'); if(c) S.practiceCat=c.value; const n=$('#pcount'); if(n) S.practiceCount=+n.value; S.practiceMode=k; render(); }
+/* ---------- 闖關 ---------- */
+function levelOpen(n){
+  const ls = levelList(), k = ls.indexOf(n);
+  if (k <= 0) return true;
+  const prev = S.my && S.my.levels[ls[k-1]];
+  return !!(prev && prev.passed);
+}
+function viewChallenge(){
+  if (S.quiz) return S.quiz.done ? quizResult() : quizQuestion();
+  const ls = levelList();
+  if (!ls.length) return `<div class="card empty">老師仍未為成語設定級別。<br>（老師：在 Apps Script 執行一次 assignLevels，或在後台修改成語時選擇級別。）</div>`;
+  const L = (S.my && S.my.levels) || {};
+  const passedN = ls.filter(n=>L[n] && L[n].passed).length;
+  const starN = ls.reduce((a,n)=>a+((L[n]&&L[n].stars)||0),0);
+  return `
+  <div class="section-head"><div><h2>成語闖關</h2><div class="sub">每關 ${lvPlan(ls[0])} 題，答對 8 成就過關，並解鎖下一關。全對可得三粒星。</div></div>
+    ${S.me?`<div class="row"><span class="tag ok">已過 ${passedN} / ${ls.length} 關</span><span class="stars">★</span><b>${starN}</b><span class="sub">/ ${ls.length*3}</span></div>`:''}</div>
+  ${!S.me?`<form class="card setup" style="margin-bottom:16px" onsubmit="event.preventDefault();if(takeName())render()">${nameFields()}<div><button class="btn primary" type="submit">確定</button></div></form>`:''}
+  <div class="levels">${ls.map(n=>{
+    const st = L[n] || {}, open = levelOpen(n), cnt = levelIdioms(n).length;
+    const cls = !open ? 'locked' : st.passed ? 'passed' : '';
+    return `<div class="card level ${cls}">
+      <div class="no" aria-hidden="true">${open?CN_NUM[n]||n:'鎖'}</div>
+      <div><h3>${lvTitle(n)}　${esc(lvName(n))}</h3>
+        <div class="info">${cnt} 個成語${st.tries?` · 挑戰 ${st.tries} 次 · 最佳 ${st.best} / ${lvPlan(n)}`:''}</div>
+        ${open?'':`<div class="lockline">先通過${lvTitle(levelList()[levelList().indexOf(n)-1])}才可以挑戰</div>`}</div>
+      <div class="acts">${st.passed?starsHtml(st.stars):''}
+        <button class="btn small" onclick="S.lvFilter=${n};S.cat='';S.filter='';location.hash='#learn'">溫習本關</button>
+        <button class="btn small ${open?'primary':''}" ${open?'':'disabled'} onclick="startChallenge(${n})">${st.passed?'再挑戰':'開始挑戰'}</button></div>
+    </div>`; }).join('')}</div>`;
+}
+function startChallenge(n){
+  if (!S.me){ toast('請先填姓名和班別學號'); return; }
+  if (!levelOpen(n)) return;
+  const pool = levelIdioms(n);
+  if (pool.length < 1) return;
+  S.quiz = {qs:buildQuestions(pool, lvPlan(n), 'mix'), i:0, score:0, answered:null, log:[], level:n, ss:'s'+Date.now().toString(36)+Math.random().toString(36).slice(2,5)};
+  render(); window.scrollTo(0,0);
+}
 function buildQuestions(pool, n, mode){
   const all = S.idioms.filter(i=>i.word && i.meaning);
   const picks = shuffle(pool).slice(0, n);
@@ -406,13 +512,7 @@ function buildQuestions(pool, n, mode){
 }
 async function startQuiz(ev){
   ev.preventDefault();
-  const nm=$('#sname'), cl=$('#scls');
-  if (nm){
-    const name=nm.value.trim(), cls=cl.value.trim().toUpperCase();
-    if (!name || !cls) return;
-    S.me = {name, cls, sid:keyOf(cls,name)}; store.set('cy_me', S.me);
-    rebuildMy(); loadMyRecord();
-  }
+  if (!takeName()) return;
   const pc=$('#pcat'); S.practiceCat = pc ? pc.value : '';
   S.practiceCount = +$('#pcount').value;
   let pool = S.idioms.filter(i=>i.word && i.meaning && (!S.practiceCat || i.category===S.practiceCat));
@@ -439,10 +539,10 @@ function quizQuestion(){
       <p class="meaning">${esc(q.idiom.meaning)}</p>${q.idiom.example?`<p class="example">${esc(q.idiom.example)}</p>`:''}
       <div style="margin-top:12px"><button class="btn primary" id="nextBtn" onclick="nextQ()">${z.i+1<z.qs.length?'下一題':'看成績'}</button></div></div>` : '';
   return `<div class="quiz">
-    <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="qtype">${MODE_NAMES[q.type]}</span><span class="sub">第 ${z.i+1} / ${z.qs.length} 題 · 答對 ${z.score}</span></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:8px"><span class="qtype">${z.level?lvTitle(z.level)+' · ':''}${MODE_NAMES[q.type]}</span><span class="sub">第 ${z.i+1} / ${z.qs.length} 題 · 答對 ${z.score}</span></div>
     <div class="progressbar"><i style="width:${(z.i+(a?1:0))/z.qs.length*100}%"></i></div>
     ${prompt}<div class="opts">${opts}</div>${fb}
-    <div style="margin-top:22px"><button class="btn small" onclick="S.quiz=null;render()">結束練習</button></div>
+    <div style="margin-top:22px"><button class="btn small" onclick="S.quiz=null;render()">${z.level?'放棄這次挑戰':'結束練習'}</button></div>
   </div>`;
 }
 function answer(idx){
@@ -456,12 +556,34 @@ function answer(idx){
 function nextQ(){ const z=S.quiz; z.answered=null; z.i++; if (z.i>=z.qs.length){ z.done=true; setTimeout(loadTop, 2500); } render(); }
 function quizResult(){
   const z=S.quiz, wrong=z.log.filter(l=>!l.ok);
+  if (z.level) return challengeResult(z, wrong);
   return `<div class="quiz card" style="display:grid;gap:14px">
     <div class="row" style="gap:18px"><div class="score">${z.score}<span style="font-size:24px;color:var(--muted)"> / ${z.qs.length}</span></div>
       <div><h2 style="font-size:22px">${z.score===z.qs.length?'全部答對，好厲害！':pct(z.score,z.qs.length)>=70?'做得不錯！':'繼續努力！'}</h2><div class="sub">正確率 ${pct(z.score,z.qs.length)}%</div></div></div>
     ${wrong.length?`<div><h3 style="font-size:17px;margin-bottom:8px">要再溫習的成語</h3><div class="grid">${wrong.map(l=>`<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--line);padding-top:10px">${tz(l.q.idiom.word)}<div style="flex:1;min-width:180px"><div>${esc(l.q.idiom.meaning)}</div><div class="sub">你選了：${esc(l.chosen)}</div></div></div>`).join('')}</div></div>`:''}
     <div class="row"><button class="btn primary" onclick="S.quiz=null;render()">再練一次</button>${wrong.length?`<button class="btn" onclick="S.practiceMode='wrong';S.quiz=null;render()">只練錯題</button>`:''}</div>
   </div>`;
+}
+
+function wrongList(wrong){
+  return wrong.length?`<div><h3 style="font-size:17px;margin-bottom:8px">要再溫習的成語</h3><div class="grid">${wrong.map(l=>`<div class="row" style="align-items:flex-start;gap:12px;border-top:1px solid var(--line);padding-top:10px">${tz(l.q.idiom.word)}<div style="flex:1;min-width:180px"><div>${esc(l.q.idiom.meaning)}</div><div class="sub">你選了：${esc(l.chosen)}</div></div></div>`).join('')}</div></div>`:'';
+}
+function challengeResult(z, wrong){
+  const n=z.level, total=z.qs.length, need=Math.ceil(total*0.8), pass=z.score>=need, k=starsFor(z.score,total);
+  const ls=levelList(), next=ls[ls.indexOf(n)+1];
+  return `<div class="quiz card" style="display:grid;gap:16px;text-align:center">
+    <div class="sub">${lvTitle(n)}　${esc(lvName(n))}</div>
+    ${starsHtml(k,'big-stars')}
+    <h2 style="font-size:26px">${pass?(k===3?'全部答對，完美過關！':'過關了！'):'差一點點，再試一次！'}</h2>
+    <div><span class="score" style="font-size:44px">${z.score}</span><span class="sub"> / ${total}　（要答對 ${need} 題過關）</span></div>
+    ${pass&&next?`<div class="tag ok" style="justify-self:center;font-size:15px;padding:4px 14px">已解鎖${lvTitle(next)}</div>`:''}
+    ${pass&&!next?`<div class="tag ok" style="justify-self:center;font-size:15px;padding:4px 14px">你已完成所有關卡！</div>`:''}
+    <div style="text-align:left">${wrongList(wrong)}</div>
+    <div class="row" style="justify-content:center">
+      ${pass&&next?`<button class="btn primary" onclick="startChallenge(${next})">挑戰${lvTitle(next)}</button>`:''}
+      <button class="btn ${pass&&next?'':'primary'}" onclick="startChallenge(${n})">${pass?'再挑戰爭取更多星':'再挑戰'}</button>
+      <button class="btn" onclick="S.quiz=null;render()">返回關卡</button>
+    </div></div>`;
 }
 
 /* ---------- 我的紀錄 ---------- */
@@ -478,6 +600,7 @@ function viewRecord(){
     <div class="tile"><div class="n">${pct(m.correct,m.total)}%</div><div class="l">正確率</div></div>
     <div class="tile"><div class="n">${rows.filter(r=>!isWeak(r.b)).length}</div><div class="l">已掌握成語</div></div>
     <div class="tile"><div class="n" style="color:var(--seal)">${weak.length}</div><div class="l">要再溫習</div></div>
+    ${levelList().length?`<div class="tile"><div class="n">${levelList().filter(n=>m.levels[n]&&m.levels[n].passed).length}<span style="font-size:16px;color:var(--muted)"> / ${levelList().length}</span></div><div class="l">已過關卡</div></div>`:''}
   </div>
   ${weak.length?`<h3 style="font-size:18px;margin-bottom:10px">要再溫習</h3><div class="grid cards" style="margin-bottom:24px">${weak.map(r=>cardHtml(r.i)).join('')}</div>`:''}
   <h3 style="font-size:18px;margin-bottom:10px">最近作答</h3>
@@ -499,7 +622,7 @@ async function loadTeacher(){
     if (!r.ok){ if (/密碼/.test(r.error||'')){ S.pw=null; try{sessionStorage.removeItem('cy_pw')}catch(e){} toast('密碼不正確'); } else toast('載入失敗：'+r.error); }
     else {
       S.idioms = r.idioms.sort((a,b)=>(a.createdAt||0)-(b.createdAt||0)); store.set('cy_idioms', S.idioms);
-      S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now();
+      S.all = aggregate(r.log); S.teacherLoaded = true; S.loadedAt = Date.now(); loadTop();
     }
   } catch(e){ toast('未能連接 Google 試算表'); }
   S.tLoading = false; softRender();
@@ -518,8 +641,8 @@ function viewTeacher(){
     <div><button class="btn primary" type="submit">登入</button></div></form>`;
   if (!S.teacherLoaded) return `<div class="empty">${S.tLoading?'正在讀取試算表…':'未能載入。'}</div>`;
   const sub = S.tSub;
-  const tabs = [['students','學生情況'],['idioms','成語庫'],['hard','成語難度']];
-  const body = sub==='idioms' ? teacherIdioms() : sub==='hard' ? teacherHard() : teacherStudents();
+  const tabs = [['students','學生情況'],['levels','闖關進度'],['idioms','成語庫'],['hard','成語難度']];
+  const body = sub==='idioms' ? teacherIdioms() : sub==='hard' ? teacherHard() : sub==='levels' ? teacherLevels() : teacherStudents();
   return `<div class="section-head"><div><h2>老師後台</h2><div class="sub">資料更新於 ${fmtTime(S.loadedAt)}</div></div>
     <div class="row"><button class="btn small" onclick="loadTeacher()" ${S.tLoading?'disabled':''}>${S.tLoading?'更新中…':'重新整理'}</button><button class="btn small" onclick="teacherLogout()">登出</button></div></div>
   <div class="subtabs">${tabs.map(([k,l])=>`<button aria-pressed="${sub===k}" onclick="S.tSub='${k}';S.openStudent=null;render()">${l}</button>`).join('')}</div>${body}`;
@@ -536,16 +659,19 @@ function teacherStudents(){
     <div class="tile"><div class="n">${tot}</div><div class="l">總作答題數</div></div>
     <div class="tile"><div class="n">${pct(cor,tot)}%</div><div class="l">整體正確率</div></div>
   </div>
+  ${S.topMissing?'<div class="banner err">Google Apps Script 仍是舊版程式，學生在首頁看不到首三名。請把新的 Code.gs 貼上，再按「部署 → 管理部署作業 → 編輯 → 新版本 → 部署」。</div>':''}
   ${podiumHtml(topFromAll(),'首三名（學生在首頁會看到）')}
   ${st.length?`<div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="sub">按一行看該學生的詳細紀錄</span><button class="btn small" onclick="downloadCsv()">下載成績 (CSV)</button></div>
-  <div class="tablebox"><table><thead><tr><th>班別學號</th><th>姓名</th><th>作答題數</th><th>練習日數</th><th>正確率</th><th>要溫習</th><th>最後練習</th></tr></thead><tbody>
+  <div class="tablebox"><table><thead><tr><th>班別學號</th><th>姓名</th><th>作答題數</th><th>練習日數</th><th>正確率</th><th>闖關</th><th>要溫習</th><th>最後練習</th></tr></thead><tbody>
   ${sortStudents(st).map((s,ix)=>{ const p=pct(s.correct,s.total); const weak=Object.values(s.byIdiom).filter(isWeak).length;
     return `<tr class="click" tabindex="0" onclick="openStu(${ix})" onkeydown="if(event.key==='Enter')openStu(${ix})">
     <td>${esc(s.cls||'—')}</td><td>${esc(s.name)}</td><td class="num">${s.total}</td><td class="num">${s.sessions}</td>
     <td class="num"><span class="bar"><i style="width:${p}%;background:${p>=70?'var(--jade)':p>=50?'var(--gold)':'var(--seal)'}"></i></span>${p}%</td>
+    <td class="num">${passedCount(s)} / ${levelList().length}</td>
     <td class="num">${weak?`<span class="tag warn">${weak} 個</span>`:'—'}</td><td class="num">${ago(s.lastAt)}</td></tr>`; }).join('')}
   </tbody></table></div>`:'<div class="card empty">仍未有學生練習。把網址給學生，他們做練習後按「重新整理」就會看到。</div>'}`;
 }
+const passedCount = s => levelList().filter(n=>s.levels[n]&&s.levels[n].passed).length;
 function openStu(ix){ S.openStudent = sortStudents(S.all)[ix].id; render(); window.scrollTo(0,0); }
 function studentDetail(s){
   const rows = Object.entries(s.byIdiom).map(([id,b])=>({id,b,w:(byId(id)||{}).word})).filter(r=>r.w).sort((a,b)=>(b.b.w-b.b.c)-(a.b.w-a.b.c));
@@ -556,6 +682,10 @@ function studentDetail(s){
     <div class="tile"><div class="n">${pct(s.correct,s.total)}%</div><div class="l">正確率</div></div>
     <div class="tile"><div class="n">${s.sessions}</div><div class="l">練習日數</div></div>
     <div class="tile"><div class="n">${rows.length}</div><div class="l">做過的成語</div></div></div>
+  ${levelList().length?`<h3 style="font-size:17px;margin-bottom:8px">闖關進度</h3>
+  <div class="tablebox" style="margin-bottom:22px"><table><thead><tr><th>關卡</th><th>挑戰次數</th><th>最佳成績</th><th>狀態</th></tr></thead><tbody>
+  ${levelList().map(n=>{ const L=s.levels[n]||{}; return `<tr><td>${lvTitle(n)} ${esc(lvName(n))}</td><td class="num">${L.tries||0}</td><td class="num">${L.tries?L.best+' / '+lvPlan(n):'—'}</td><td>${L.passed?starsHtml(L.stars):L.tries?'<span class="tag warn">未過關</span>':'<span class="sub">未挑戰</span>'}</td></tr>`; }).join('')}
+  </tbody></table></div>`:''}
   <h3 style="font-size:17px;margin-bottom:8px">逐個成語表現</h3>
   <div class="tablebox" style="margin-bottom:22px"><table><thead><tr><th>成語</th><th>答對</th><th>答錯</th><th>最近一次</th></tr></thead><tbody>
   ${rows.map(r=>`<tr><td class="ws">${esc(r.w)}</td><td class="num">${r.b.c}</td><td class="num">${r.b.w}</td><td>${r.b.last?'<span class="tag ok">對</span>':'<span class="tag warn">錯</span>'}</td></tr>`).join('')||'<tr><td colspan="4" class="empty">未有紀錄</td></tr>'}
@@ -569,13 +699,27 @@ async function resetStudent(sid){
   catch(e){ toast('未能清除：'+e.message); }
 }
 function downloadCsv(){
-  const head=['班別學號','姓名','作答題數','練習日數','正確率(%)','要溫習成語','最後練習'];
-  const lines=[head].concat(sortStudents(S.all).map(s=>[s.cls,s.name,s.total,s.sessions,pct(s.correct,s.total),
+  const head=['班別學號','姓名','作答題數','練習日數','正確率(%)','已過關卡','要溫習成語','最後練習'];
+  const lines=[head].concat(sortStudents(S.all).map(s=>[s.cls,s.name,s.total,s.sessions,pct(s.correct,s.total),passedCount(s),
     Object.entries(s.byIdiom).filter(([,b])=>isWeak(b)).map(([id])=>(byId(id)||{}).word).filter(Boolean).join('、'), fmtTime(s.lastAt)]));
   const csv='﻿'+lines.map(r=>r.map(x=>`"${String(x).replace(/"/g,'""')}"`).join(',')).join('\r\n');
   const a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv;charset=utf-8'}));
   const d=new Date(); a.download=`成語練習成績_${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}${String(d.getDate()).padStart(2,'0')}.csv`;
   document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+}
+function teacherLevels(){
+  const ls = levelList();
+  if (!ls.length) return '<div class="card empty">成語仍未設定級別。請在 Apps Script 執行一次 assignLevels，或在「成語庫」修改成語時選擇級別。</div>';
+  const st = S.all;
+  return `<p class="sub" style="margin-top:0">每關 ${lvPlan(ls[0])} 題，答對 8 成過關。</p>
+  <div class="tablebox" style="margin-bottom:22px"><table><thead><tr><th>關卡</th><th>成語數</th><th>挑戰過的學生</th><th>已過關</th><th>過關率</th></tr></thead><tbody>
+  ${ls.map(n=>{ const tried=st.filter(s=>s.levels[n]).length, passed=st.filter(s=>s.levels[n]&&s.levels[n].passed).length, p=pct(passed,tried);
+    return `<tr><td>${lvTitle(n)} ${esc(lvName(n))}</td><td class="num">${levelIdioms(n).length}</td><td class="num">${tried}</td><td class="num">${passed}</td>
+    <td class="num">${tried?`<span class="bar"><i style="width:${p}%;background:${p>=70?'var(--jade)':p>=40?'var(--gold)':'var(--seal)'}"></i></span>${p}%`:'<span class="sub">未有人挑戰</span>'}</td></tr>`; }).join('')}
+  </tbody></table></div>
+  ${st.length?`<h3 style="font-size:17px;margin-bottom:8px">每位學生</h3><div class="tablebox"><table><thead><tr><th>班別學號</th><th>姓名</th>${ls.map(n=>`<th>${lvTitle(n)}</th>`).join('')}</tr></thead><tbody>
+  ${sortStudents(st).map(s=>`<tr><td>${esc(s.cls)}</td><td>${esc(s.name)}</td>${ls.map(n=>{ const L=s.levels[n]; return `<td>${L&&L.passed?starsHtml(L.stars):L?'<span class="tag warn">未過</span>':'<span class="sub">—</span>'}</td>`; }).join('')}</tr>`).join('')}
+  </tbody></table></div>`:''}`;
 }
 function teacherHard(){
   const agg={};
@@ -590,8 +734,8 @@ function teacherHard(){
 }
 function teacherIdioms(){
   return `<div class="row" style="margin-bottom:14px"><button class="btn primary" onclick="editIdiom()">＋ 新增成語</button><button class="btn" onclick="bulkImport()">批量匯入</button><span class="sub">共 ${S.idioms.length} 個 · 亦可直接在 Google 試算表「成語」工作表修改</span></div>
-  ${S.idioms.length?`<div class="tablebox"><table><thead><tr><th>成語</th><th>解釋</th><th>例句</th><th>分類</th><th></th></tr></thead><tbody>
-  ${S.idioms.slice().reverse().map(i=>`<tr><td class="ws" style="white-space:nowrap">${esc(i.word)}${i.reading?`<div class="reading" style="margin:0;font-family:var(--body);font-weight:400">${esc(i.reading)}</div>`:''}</td><td>${esc(i.meaning)}</td><td class="sub">${esc(i.example||'')}${i.example && !i.example.includes(i.word)?'<div><span class="tag warn">例句未包含此成語，不會出例句題</span></div>':''}</td><td>${i.category?`<span class="tag">${esc(i.category)}</span>`:''}</td>
+  ${S.idioms.length?`<div class="tablebox"><table><thead><tr><th>成語</th><th>解釋</th><th>例句</th><th>分類／關卡</th><th></th></tr></thead><tbody>
+  ${S.idioms.slice().reverse().map(i=>`<tr><td class="ws" style="white-space:nowrap">${esc(i.word)}${i.reading?`<div class="reading" style="margin:0;font-family:var(--body);font-weight:400">${esc(i.reading)}</div>`:''}</td><td>${esc(i.meaning)}</td><td class="sub">${esc(i.example||'')}${i.example && !i.example.includes(i.word)?'<div><span class="tag warn">例句未包含此成語，不會出例句題</span></div>':''}</td><td>${i.category?`<span class="tag">${esc(i.category)}</span>`:''}${i.level?`<div style="margin-top:4px"><span class="tag" style="background:var(--gold-soft);color:var(--gold)">${lvTitle(+i.level)}</span></div>`:''}</td>
   <td style="white-space:nowrap"><button class="btn small" onclick="editIdiom('${esc(i.id)}')">修改</button> <button class="btn small danger" onclick="armDelete(this, ()=>delIdiom('${esc(i.id)}'))">刪除</button></td></tr>`).join('')}
   </tbody></table></div>`:'<div class="card empty">未有成語，按「新增成語」或「批量匯入」開始。</div>'}`;
 }
@@ -614,14 +758,15 @@ function editIdiom(id){
       <label class="f" style="flex:1;min-width:140px"><span>讀音（粵拼／拼音，可留空）</span><input type="text" id="f_reading" value="${esc(i.reading)}"></label></div>
     <label class="f"><span>解釋 *</span><textarea id="f_meaning" required>${esc(i.meaning)}</textarea></label>
     <label class="f"><span>例句（要包含成語本身，才會出例句填空題）</span><textarea id="f_example">${esc(i.example)}</textarea></label>
-    <label class="f"><span>分類</span><input type="text" id="f_cat" list="catlist" value="${esc(i.category)}"><datalist id="catlist">${cats().map(c=>`<option value="${esc(c)}">`).join('')}</datalist></label>
+    <div class="row" style="gap:12px"><label class="f" style="flex:1;min-width:160px"><span>分類</span><input type="text" id="f_cat" list="catlist" value="${esc(i.category)}"><datalist id="catlist">${cats().map(c=>`<option value="${esc(c)}">`).join('')}</datalist></label>
+    <label class="f" style="width:170px"><span>闖關級別</span><select id="f_lv"><option value="0">不放入闖關</option>${[1,2,3,4,5,6,7,8].map(n=>`<option value="${n}" ${+i.level===n?'selected':''}>${lvTitle(n)} ${esc(lvName(n))}</option>`).join('')}</select></label></div>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" onclick="$('#dlg').close()">取消</button><button class="btn primary" type="submit" id="fsave">儲存</button></div>
   </form>`;
   d.showModal();
   $('#idf').onsubmit = async ev => {
     ev.preventDefault();
     const data = { id:id||'', word:$('#f_word').value.trim(), reading:$('#f_reading').value.trim(), meaning:$('#f_meaning').value.trim(),
-      example:$('#f_example').value.trim(), category:$('#f_cat').value.trim(), createdAt:i.createdAt||Date.now() };
+      example:$('#f_example').value.trim(), category:$('#f_cat').value.trim(), level:+$('#f_lv').value||0, createdAt:i.createdAt||Date.now() };
     if (!data.word || !data.meaning) return;
     $('#fsave').disabled = true; $('#fsave').textContent='儲存中…';
     try {
@@ -638,7 +783,7 @@ function bulkImport(){
   const d=$('#dlg');
   d.innerHTML = `<form class="dlg" id="bf">
     <h2 style="font-size:22px">批量匯入成語</h2>
-    <p class="sub" style="margin:0">每行一個成語，用「|」或 Tab 分隔：<br><b>成語 | 解釋 | 例句 | 分類 | 讀音</b>（後面三項可留空）。可直接由 Excel 複製貼上。</p>
+    <p class="sub" style="margin:0">每行一個成語，用「|」或 Tab 分隔：<br><b>成語 | 解釋 | 例句 | 分類 | 讀音 | 級別</b>（後面四項可留空；級別填 1 至 5）。可直接由 Excel 複製貼上。</p>
     <textarea id="bt" style="min-height:200px" placeholder="守株待兔 | 比喻妄想不勞而獲，或死守狹隘經驗，不知變通。 | 做生意要主動開拓客源，不能守株待兔。 | 動物寓言"></textarea>
     <div class="sub" id="bmsg"></div>
     <div class="row" style="justify-content:flex-end"><button type="button" class="btn" onclick="$('#dlg').close()">取消</button><button class="btn primary" type="submit" id="bgo">匯入</button></div>
@@ -647,7 +792,7 @@ function bulkImport(){
   $('#bf').onsubmit = async ev => {
     ev.preventDefault();
     const items = $('#bt').value.split('\n').map(l=>l.split(/\t|\||｜/).map(x=>x.trim())).filter(p=>p[0]&&p[1])
-      .map(p=>({word:p[0], meaning:p[1], example:p[2]||'', category:p[3]||'', reading:p[4]||''}));
+      .map(p=>({word:p[0], meaning:p[1], example:p[2]||'', category:p[3]||'', reading:p[4]||'', level:parseInt(p[5])||0}));
     if (!items.length){ $('#bmsg').textContent='每行最少要有成語和解釋。'; return; }
     $('#bgo').disabled=true; $('#bmsg').textContent='匯入中…';
     try {

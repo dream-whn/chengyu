@@ -3,13 +3,14 @@
  * 1. 改下面的老師密碼
  * 2. 選擇函式「setup」按「執行」一次（第一次會要求授權）
  * 3. 部署 → 新增部署作業 → 網頁應用程式（執行身分：我；存取權：所有人）
+ * 已經用緊舊版？選擇函式「assignLevels」執行一次，就會加上「級別」欄並把 100 個成語分成 5 關。
  */
-const TEACHER_PASSWORD = '請改成你的密碼';
+const TEACHER_PASSWORD = 'cisabc123';
 
 const SHEET_IDIOMS = '成語';
 const SHEET_LOG = '作答紀錄';
-const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間'];
-const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案'];
+const IDIOM_HEAD = ['id', '成語', '解釋', '例句', '分類', '讀音', '建立時間', '級別'];
+const LOG_HEAD = ['時間', '學生編號', '班別學號', '姓名', '成語ID', '成語', '題型', '結果', '所選答案', '關卡', '場次'];
 
 /* ---------- 初次設定 ---------- */
 function setup() {
@@ -18,15 +19,42 @@ function setup() {
   if (s.getLastRow() === 0) {
     s.appendRow(IDIOM_HEAD);
     const now = Date.now();
-    const rows = SEED.map((r, i) => ['c' + String(i + 1).padStart(3, '0'), r[0], r[1], '', r[2], '', now + i]);
+    const rows = SEED.map((r, i) => ['c' + String(i + 1).padStart(3, '0'), r[0], r[1], '', r[2], '', now + i, LEVELS[r[0]] || '']);
     s.getRange(2, 1, rows.length, IDIOM_HEAD.length).setValues(rows);
   }
+  ensureHeaders_();
   s.setFrozenRows(1);
   let l = ss.getSheetByName(SHEET_LOG) || ss.insertSheet(SHEET_LOG);
   if (l.getLastRow() === 0) l.appendRow(LOG_HEAD);
   l.setFrozenRows(1);
   const first = ss.getSheets()[0];
   if (first.getName() !== SHEET_IDIOMS && first.getName() !== SHEET_LOG && first.getLastRow() === 0) ss.deleteSheet(first);
+}
+
+/* 舊版試算表補上新欄位標題 */
+function ensureHeaders_() {
+  const ss = SpreadsheetApp.getActive();
+  [[SHEET_IDIOMS, IDIOM_HEAD], [SHEET_LOG, LOG_HEAD]].forEach(([name, head]) => {
+    const sh = ss.getSheetByName(name);
+    if (sh && sh.getLastRow() > 0) sh.getRange(1, 1, 1, head.length).setValues([head]);
+  });
+}
+
+/* 把初始 100 個成語分成 5 關（只填空白的級別，老師改過的不會被覆蓋） */
+function assignLevels() {
+  setup();
+  const s = sheet_(SHEET_IDIOMS);
+  const n = s.getLastRow() - 1;
+  if (n < 1) return;
+  const words = s.getRange(2, 2, n, 1).getValues();
+  const lv = s.getRange(2, 8, n, 1).getValues();
+  let changed = 0;
+  words.forEach((w, i) => {
+    const k = LEVELS[String(w[0]).trim()];
+    if (k && !lv[i][0]) { lv[i][0] = k; changed++; }
+  });
+  s.getRange(2, 8, n, 1).setValues(lv);
+  Logger.log('已設定 ' + changed + ' 個成語的級別');
 }
 
 /* ---------- 讀取 ---------- */
@@ -53,7 +81,7 @@ function readIdioms_() {
       fixed = true;
     }
     out.push({ id: String(r[0]), word: String(r[1]).trim(), meaning: String(r[2]), example: String(r[3]),
-      category: String(r[4]), reading: String(r[5]), createdAt: Number(r[6]) || (i + 1) });
+      category: String(r[4]), reading: String(r[5]), createdAt: Number(r[6]) || (i + 1), level: Number(r[7]) || 0 });
   });
   return out;
 }
@@ -65,7 +93,7 @@ function readLog_() {
   return s.getRange(2, 1, n, LOG_HEAD.length).getValues().map(r => ({
     t: r[0] instanceof Date ? r[0].getTime() : Number(r[0]) || 0,
     sid: String(r[1]), cls: String(r[2]), name: String(r[3]), i: String(r[4]), w: String(r[5]),
-    m: String(r[6]), ok: r[7] === '對' ? 1 : 0, a: String(r[8])
+    m: String(r[6]), ok: r[7] === '對' ? 1 : 0, a: String(r[8]), lv: Number(r[9]) || 0, ss: String(r[10] || '')
   }));
 }
 
@@ -132,7 +160,7 @@ function saveAnswers_(rows) {
   rows = rows.slice(0, 200);
   if (!rows.length) return { ok: true, saved: 0 };
   const vals = rows.map(r => [new Date(Number(r.t) || Date.now()), clean_(r.sid, 80), clean_(r.cls, 20), clean_(r.name, 30),
-    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20)]);
+    clean_(r.i, 40), clean_(r.w, 20), clean_(r.m, 20), r.ok ? '對' : '錯', clean_(r.a, 20), Number(r.lv) || '', clean_(r.ss, 40)]);
   const s = sheet_(SHEET_LOG);
   s.getRange(s.getLastRow() + 1, 1, vals.length, LOG_HEAD.length).setValues(vals);
   return { ok: true, saved: vals.length };
@@ -150,7 +178,7 @@ function saveIdiom_(d) {
   if (!d || !d.word || !d.meaning) return { ok: false, error: '要有成語和解釋' };
   const s = sheet_(SHEET_IDIOMS);
   const id = d.id || ('i' + Date.now().toString(36) + Math.floor(Math.random() * 1e4));
-  const row = [id, clean_(d.word, 20), clean_(d.meaning), clean_(d.example), clean_(d.category, 40), clean_(d.reading, 80), Number(d.createdAt) || Date.now()];
+  const row = [id, clean_(d.word, 20), clean_(d.meaning), clean_(d.example), clean_(d.category, 40), clean_(d.reading, 80), Number(d.createdAt) || Date.now(), Number(d.level) || ''];
   const at = d.id ? findRow_(s, d.id) : -1;
   if (at > 0) s.getRange(at, 1, 1, row.length).setValues([row]);
   else {
@@ -175,7 +203,7 @@ function bulkIdioms_(items) {
     const w = String(p.word || '').trim();
     if (!w || !p.meaning || have.has(w)) return;
     have.add(w);
-    rows.push(['i' + now.toString(36) + k, clean_(w, 20), clean_(p.meaning), clean_(p.example), clean_(p.category, 40), clean_(p.reading, 80), now + k]);
+    rows.push(['i' + now.toString(36) + k, clean_(w, 20), clean_(p.meaning), clean_(p.example), clean_(p.category, 40), clean_(p.reading, 80), now + k, Number(p.level) || '']);
   });
   if (rows.length) {
     const s = sheet_(SHEET_IDIOMS);
@@ -298,3 +326,6 @@ const SEED = [
   ["無可奈何", "毫無辦法。", "時間與行動"],
   ["莫名其妙", "形容事情奇怪，不合常理。", "時間與行動"]
 ];
+
+/* ---------- 5 關分級（1 最易，5 最難） ---------- */
+const LEVELS = {"一心一意": 1, "三心二意": 1, "四面八方": 1, "十全十美": 1, "七上八下": 1, "人山人海": 1, "春暖花開": 1, "鳥語花香": 1, "笑容滿面": 1, "大吃一驚": 1, "自言自語": 1, "亂七八糟": 1, "傾盆大雨": 1, "萬里無雲": 1, "冰天雪地": 1, "繁星點點": 1, "手舞足蹈": 1, "眉開眼笑": 1, "相親相愛": 1, "助人為樂": 1, "五花八門": 2, "獨一無二": 2, "千方百計": 2, "山清水秀": 2, "風和日麗": 2, "秋高氣爽": 2, "興高采烈": 2, "垂頭喪氣": 2, "悶悶不樂": 2, "膽小如鼠": 2, "骨瘦如柴": 2, "濃眉大眼": 2, "和藹可親": 2, "彬彬有禮": 2, "拾金不昧": 2, "知錯能改": 2, "誠實守信": 2, "光陰似箭": 2, "滿載而歸": 2, "迫不及待": 2, "萬無一失": 3, "九牛一毛": 3, "依山傍水": 3, "心花怒放": 3, "提心吊膽": 3, "喜出望外": 3, "目不轉睛": 3, "精神奕奕": 3, "井井有條": 3, "車水馬龍": 3, "鴉雀無聲": 3, "震耳欲聾": 3, "川流不息": 3, "煥然一新": 3, "全神貫注": 3, "半途而廢": 3, "名列前茅": 3, "不約而同": 3, "自告奮勇": 3, "隨手可得": 3, "守株待兔": 4, "畫蛇添足": 4, "亡羊補牢": 4, "井底之蛙": 4, "狐假虎威": 4, "對牛彈琴": 4, "盲人摸象": 4, "如魚得水": 4, "鶴立雞群": 4, "自相矛盾": 4, "掩耳盜鈴": 4, "刻舟求劍": 4, "杞人憂天": 4, "雪中送炭": 4, "錦上添花": 4, "火上加油": 4, "恍然大悟": 4, "呆若木雞": 4, "日月如梭": 4, "爭分奪秒": 4, "怒髮衝冠": 5, "美不勝收": 5, "廢寢忘食": 5, "持之以恆": 5, "循序漸進": 5, "溫故知新": 5, "勤能補拙": 5, "不恥下問": 5, "學富五車": 5, "大公無私": 5, "見義勇為": 5, "禮尚往來": 5, "飲水思源": 5, "尊師重道": 5, "異想天開": 5, "得意忘形": 5, "班門弄斧": 5, "曇花一現": 5, "無可奈何": 5, "莫名其妙": 5};
