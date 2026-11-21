@@ -7,7 +7,7 @@
  * 要加例句？選擇函式「addExamples」執行一次，會為 100 個成語填上例句（已有例句的不會被覆蓋）。
  * 要用錄音功能？更新程式後再執行一次「setup」，按提示允許存取 Google 雲端硬碟（錄音會存在「成語練習室錄音」資料夾）。
  */
-const TEACHER_PASSWORD = 'cisabc123';
+const TEACHER_PASSWORD = '老師密碼';
 
 const SHEET_IDIOMS = '成語';
 const SHEET_LOG = '作答紀錄';
